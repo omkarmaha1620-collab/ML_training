@@ -1,0 +1,936 @@
+/* ============================================================
+   GLOBAL
+============================================================ */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+}
+
+body {
+
+    font-family:
+        "Segoe UI",
+        Arial,
+        sans-serif;
+
+    background:
+        #03131f;
+
+    color: #ffffff;
+
+    overflow: hidden;
+}
+
+
+/* ============================================================
+   OCEAN BACKGROUND
+============================================================ */
+
+.ocean-background {
+
+    position: fixed;
+
+    inset: 0;
+
+    overflow: hidden;
+
+    background:
+        radial-gradient(
+            circle at 50% 30%,
+            rgba(16, 106, 142, 0.35),
+            transparent 45%
+        ),
+
+        linear-gradient(
+            180deg,
+            #031522 0%,
+            #06263a 45%,
+            #031923 100%
+        );
+
+    z-index: -10;
+}
+
+
+/* ocean glow */
+
+.ocean-background::before {
+
+    content: "";
+
+    position: absolute;
+
+    width: 700px;
+    height: 700px;
+
+    left: 50%;
+    top: 35%;
+
+    transform:
+        translate(-50%, -50%);
+
+    border-radius: 50%;
+
+    background:
+        radial-gradient(
+            circle,
+            rgba(24, 193, 239, 0.15),
+            transparent 68%
+        );
+
+    animation:
+        oceanGlow 6s ease-in-out infinite;
+}
+
+
+@keyframes oceanGlow {
+
+    0%,
+    100% {
+        transform:
+            translate(-50%, -50%)
+            scale(1);
+    }
+
+    50% {
+        transform:
+            translate(-50%, -50%)
+            scale(1.15);
+    }
+
+}
+
+
+/* ============================================================
+   WAVES
+============================================================ */
+
+.wave {
+
+    position: absolute;
+
+    left: -10%;
+
+    width: 120%;
+
+    height: 180px;
+
+    border-radius: 50%;
+
+    opacity: 0.18;
+
+    border-top:
+        2px solid
+        rgba(61, 213, 255, 0.55);
+
+    filter:
+        blur(1px);
+}
+
+
+.wave-1 {
+
+    bottom: -50px;
+
+    animation:
+        waveMove1 8s ease-in-out infinite;
+}
+
+
+.wave-2 {
+
+    bottom: 35px;
+
+    opacity: 0.12;
+
+    animation:
+        waveMove2 11s ease-in-out infinite;
+}
+
+
+.wave-3 {
+
+    bottom: 115px;
+
+    opacity: 0.08;
+
+    animation:
+        waveMove1 14s ease-in-out infinite reverse;
+}
+
+
+@keyframes waveMove1 {
+
+    0%,
+    100% {
+        transform:
+            translateX(-3%)
+            rotate(-1deg);
+    }
+
+    50% {
+        transform:
+            translateX(3%)
+            rotate(1deg);
+    }
+
+}
+
+
+@keyframes waveMove2 {
+
+    0%,
+    100% {
+        transform:
+            translateX(4%)
+            rotate(1deg);
+    }
+
+    50% {
+        transform:
+            translateX(-4%)
+            rotate(-1deg);
+    }
+
+}
+
+
+/* ============================================================
+   FLOATING PARTICLES
+============================================================ */
+
+.floating-particle {
+
+    position: absolute;
+
+    width: 4px;
+    height: 4px;
+
+    border-radius: 50%;
+
+    background:
+        rgba(72, 220, 255, 0.7);
+
+    box-shadow:
+        0 0 12px
+        rgba(72, 220, 255, 0.8);
+
+    animation:
+        particleFloat 8s linear infinite;
+}
+
+
+.particle-1 {
+    left: 15%;
+    top: 70%;
+    animation-delay: 0s;
+}
+
+.particle-2 {
+    left: 30%;
+    top: 85%;
+    animation-delay: 2s;
+}
+
+.particle-3 {
+    left: 62%;
+    top: 75%;
+    animation-delay: 4s;
+}
+
+.particle-4 {
+    left: 78%;
+    top: 88%;
+    animation-delay: 1s;
+}
+
+.particle-5 {
+    left: 88%;
+    top: 68%;
+    animation-delay: 5s;
+}
+
+
+@keyframes particleFloat {
+
+    0% {
+        transform:
+            translateY(40px);
+
+        opacity: 0;
+    }
+
+    20% {
+        opacity: 0.8;
+    }
+
+    80% {
+        opacity: 0.5;
+    }
+
+    100% {
+        transform:
+            translateY(-180px);
+
+        opacity: 0;
+    }
+
+}
+
+
+/* ============================================================
+   HEADER
+============================================================ */
+
+.landing-header {
+
+    position: absolute;
+
+    top: 0;
+    left: 0;
+    right: 0;
+
+    height: 82px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    padding:
+        0 42px;
+
+    border-bottom:
+        1px solid
+        rgba(70, 203, 235, 0.12);
+
+    background:
+        rgba(2, 15, 25, 0.72);
+
+    backdrop-filter:
+        blur(12px);
+}
+
+
+.brand {
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 14px;
+}
+
+
+.brand-mark {
+
+    width: 42px;
+    height: 42px;
+
+    display: flex;
+
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 11px;
+
+    font-size: 23px;
+
+    color: #ffffff;
+
+    background:
+        linear-gradient(
+            135deg,
+            #22d3ee,
+            #149dcc
+        );
+
+    box-shadow:
+        0 0 25px
+        rgba(34, 211, 238, 0.25);
+}
+
+
+.brand-title {
+
+    font-size: 16px;
+
+    font-weight: 800;
+
+    letter-spacing: 1.5px;
+}
+
+
+.brand-subtitle {
+
+    margin-top: 3px;
+
+    color:
+        #7ea4b7;
+
+    font-size: 11px;
+
+    letter-spacing: 0.7px;
+}
+
+
+.system-status {
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 8px;
+
+    color:
+        #8eaebd;
+
+    font-size: 11px;
+
+    letter-spacing: 1px;
+}
+
+
+.status-dot {
+
+    width: 8px;
+    height: 8px;
+
+    border-radius: 50%;
+
+    background:
+        #25e58c;
+
+    box-shadow:
+        0 0 12px
+        rgba(37, 229, 140, 0.8);
+}
+
+
+/* ============================================================
+   MAIN
+============================================================ */
+
+.landing-main {
+
+    position: absolute;
+
+    top: 82px;
+    bottom: 55px;
+
+    left: 0;
+    right: 0;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    padding: 30px;
+}
+
+
+/* ============================================================
+   SHIP CARD
+============================================================ */
+
+.ship-card {
+
+    width: 460px;
+
+    max-width: 95vw;
+
+    padding: 34px;
+
+    border:
+        1px solid
+        rgba(83, 214, 244, 0.22);
+
+    border-radius: 20px;
+
+    background:
+        linear-gradient(
+            145deg,
+            rgba(7, 35, 51, 0.94),
+            rgba(3, 20, 32, 0.96)
+        );
+
+    box-shadow:
+        0 30px 80px
+        rgba(0, 0, 0, 0.45),
+
+        0 0 40px
+        rgba(24, 173, 217, 0.08);
+
+    backdrop-filter:
+        blur(18px);
+
+    animation:
+        cardAppear 0.7s ease-out;
+}
+
+
+@keyframes cardAppear {
+
+    from {
+
+        opacity: 0;
+
+        transform:
+            translateY(25px)
+            scale(0.97);
+
+    }
+
+    to {
+
+        opacity: 1;
+
+        transform:
+            translateY(0)
+            scale(1);
+
+    }
+
+}
+
+
+/* ============================================================
+   CARD HEADER
+============================================================ */
+
+.ship-card-header {
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 16px;
+
+    margin-bottom: 30px;
+}
+
+
+.ship-icon {
+
+    width: 58px;
+    height: 58px;
+
+    display: flex;
+
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 15px;
+
+    font-size: 28px;
+
+    background:
+        rgba(26, 188, 224, 0.12);
+
+    border:
+        1px solid
+        rgba(47, 210, 239, 0.25);
+
+    box-shadow:
+        inset 0 0 20px
+        rgba(26, 188, 224, 0.08);
+}
+
+
+.ship-card h1 {
+
+    font-size: 23px;
+
+    letter-spacing: 1.5px;
+
+    font-weight: 800;
+}
+
+
+.ship-card-header p {
+
+    margin-top: 6px;
+
+    color:
+        #7fa4b6;
+
+    font-size: 12px;
+
+    line-height: 1.5;
+}
+
+
+/* ============================================================
+   FORM
+============================================================ */
+
+.form-group {
+
+    margin-bottom: 20px;
+}
+
+
+.form-group label {
+
+    display: block;
+
+    margin-bottom: 8px;
+
+    color:
+        #a8c3cf;
+
+    font-size: 10px;
+
+    font-weight: 700;
+
+    letter-spacing: 1.3px;
+}
+
+
+.form-group input,
+.form-group select {
+
+    width: 100%;
+
+    height: 47px;
+
+    padding:
+        0 14px;
+
+    border:
+        1px solid
+        rgba(100, 180, 205, 0.2);
+
+    border-radius: 9px;
+
+    outline: none;
+
+    color:
+        #eafaff;
+
+    background:
+        rgba(2, 20, 31, 0.85);
+
+    font-size: 13px;
+
+    transition:
+        border 0.2s,
+        box-shadow 0.2s,
+        background 0.2s;
+}
+
+
+.form-group input::placeholder {
+
+    color:
+        #547383;
+}
+
+
+.form-group input:focus,
+.form-group select:focus {
+
+    border-color:
+        #27c8ed;
+
+    background:
+        rgba(4, 28, 42, 0.95);
+
+    box-shadow:
+        0 0 0 3px
+        rgba(39, 200, 237, 0.08);
+}
+
+
+.form-group select {
+
+    cursor: pointer;
+}
+
+
+.form-group small {
+
+    display: block;
+
+    margin-top: 6px;
+
+    color:
+        #5e8293;
+
+    font-size: 10px;
+}
+
+
+/* ============================================================
+   START BUTTON
+============================================================ */
+
+.start-button {
+
+    width: 100%;
+
+    height: 52px;
+
+    margin-top: 6px;
+
+    border: none;
+
+    border-radius: 10px;
+
+    cursor: pointer;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    gap: 10px;
+
+    color: #ffffff;
+
+    background:
+        linear-gradient(
+            135deg,
+            #13b9dd,
+            #0788b1
+        );
+
+    font-size: 12px;
+
+    font-weight: 800;
+
+    letter-spacing: 1px;
+
+    box-shadow:
+        0 10px 25px
+        rgba(9, 164, 202, 0.2);
+
+    transition:
+        transform 0.2s,
+        box-shadow 0.2s,
+        filter 0.2s;
+}
+
+
+.start-button:hover {
+
+    transform:
+        translateY(-2px);
+
+    filter:
+        brightness(1.08);
+
+    box-shadow:
+        0 15px 35px
+        rgba(9, 164, 202, 0.3);
+}
+
+
+.start-button:active {
+
+    transform:
+        translateY(0);
+}
+
+
+.start-button:disabled {
+
+    cursor:
+        wait;
+
+    opacity:
+        0.8;
+}
+
+
+.button-icon {
+
+    font-size: 15px;
+}
+
+
+.button-arrow {
+
+    font-size: 17px;
+}
+
+
+/* ============================================================
+   FEATURES
+============================================================ */
+
+.system-features {
+
+    display: flex;
+
+    justify-content: center;
+
+    gap: 18px;
+
+    margin-top: 25px;
+
+    padding-top: 20px;
+
+    border-top:
+        1px solid
+        rgba(100, 180, 205, 0.1);
+}
+
+
+.feature {
+
+    color:
+        #668b9b;
+
+    font-size: 9px;
+
+    font-weight: 700;
+
+    letter-spacing: 0.7px;
+}
+
+
+.feature span {
+
+    color:
+        #28c9ed;
+
+    margin-right: 4px;
+}
+
+
+/* ============================================================
+   FOOTER
+============================================================ */
+
+.landing-footer {
+
+    position: absolute;
+
+    left: 0;
+    right: 0;
+
+    bottom: 0;
+
+    height: 55px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    gap: 10px;
+
+    color:
+        #547382;
+
+    font-size: 9px;
+
+    letter-spacing: 1px;
+
+    border-top:
+        1px solid
+        rgba(70, 203, 235, 0.08);
+
+    background:
+        rgba(2, 15, 25, 0.65);
+}
+
+
+/* ============================================================
+   LOADING SPINNER
+============================================================ */
+
+.loading-spinner {
+
+    width: 16px;
+    height: 16px;
+
+    border:
+        2px solid
+        rgba(255, 255, 255, 0.3);
+
+    border-top-color:
+        #ffffff;
+
+    border-radius: 50%;
+
+    animation:
+        spinner 0.7s linear infinite;
+}
+
+
+@keyframes spinner {
+
+    to {
+        transform:
+            rotate(360deg);
+    }
+
+}
+
+
+/* ============================================================
+   RESPONSIVE
+============================================================ */
+
+@media (max-width: 700px) {
+
+    .landing-header {
+
+        padding:
+            0 18px;
+
+    }
+
+    .system-status {
+
+        display: none;
+
+    }
+
+    .ship-card {
+
+        padding:
+            25px;
+
+        width:
+            430px;
+
+    }
+
+}
+
+
+@media (max-height: 700px) {
+
+    .landing-main {
+
+        overflow-y:
+            auto;
+
+        align-items:
+            flex-start;
+
+        padding-top:
+            25px;
+
+        padding-bottom:
+            25px;
+
+    }
+
+}

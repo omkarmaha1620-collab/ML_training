@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Vessel Monitoring | AI Marine Monitoring
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="styles.css"
+    >
+
+    <link
+        rel="stylesheet"
+        href="monitoring.css"
+    >
+
+</head>
+
+
+<body>
+
+    <!-- =====================================================
+         MARINE BACKGROUND
+    ====================================================== -->
+
+    <div class="monitoring-background">
+
+        <div class="monitoring-wave wave-one"></div>
+        <div class="monitoring-wave wave-two"></div>
+        <div class="monitoring-wave wave-three"></div>
+
+        <div class="sea-particle particle-one"></div>
+        <div class="sea-particle particle-two"></div>
+        <div class="sea-particle particle-three"></div>
+        <div class="sea-particle particle-four"></div>
+        <div class="sea-particle particle-five"></div>
+
+    </div>
+
+
+    <!-- =====================================================
+         HEADER
+    ====================================================== -->
+
+    <header class="monitoring-header">
+
+        <div class="brand">
+
+            <div class="brand-mark">
+                ✦
+            </div>
+
+            <div class="brand-text">
+
+                <div class="brand-title">
+                    AI MARINE MONITORING
+                </div>
+
+                <div class="brand-subtitle">
+                    Intelligent Vessel & Route Safety
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <div class="monitoring-status">
+
+            <span class="status-dot"></span>
+
+            <span>
+                MONITORING ACTIVE
+            </span>
+
+            <span class="status-divider"></span>
+
+            <span id="monitoringClock">
+                --:--:-- UTC
+            </span>
+
+        </div>
+
+    </header>
+
+
+
+    <!-- =====================================================
+         MAIN
+    ====================================================== -->
+
+    <main class="monitoring-main">
+
+
+        <!-- =================================================
+             TITLE
+        ================================================== -->
+
+        <div class="monitoring-title">
+
+            <div>
+
+                <div class="eyebrow">
+                    LIVE VESSEL INTELLIGENCE
+                </div>
+
+                <h1>
+                    VESSEL MONITORING
+                </h1>
+
+                <p>
+                    AI-powered vessel movement, storm hazard
+                    and safety prediction.
+                </p>
+
+            </div>
+
+
+            <div class="live-badge">
+
+                <span class="status-dot"></span>
+
+                LIVE AIS
+
+            </div>
+
+        </div>
+
+
+
+        <!-- =================================================
+             MAIN MONITORING CARD
+        ================================================== -->
+
+        <section class="monitoring-card">
+
+
+            <!-- =============================================
+                 VESSEL INFORMATION
+            ============================================== -->
+
+            <div class="vessel-header">
+
+
+                <!-- VESSEL NAME + MMSI -->
+
+                <div class="vessel-main-info">
+
+                    <div class="large-ship-icon">
+                        🚢
+                    </div>
+
+                    <div>
+
+                        <div class="small-label">
+                            VESSEL UNDER MONITORING
+                        </div>
+
+                        <h2 id="monitorShipName">
+                            WAITING FOR LIVE AIS
+                        </h2>
+
+                        <div
+                            class="mmsi-text"
+                            id="monitorMmsi"
+                        >
+                            MMSI ----------
+                        </div>
+
+                        <!--
+                            Hidden compatibility element.
+                            monitoring.js updates panelShipName.
+                        -->
+                        <span
+                            id="panelShipName"
+                            style="display:none;"
+                        >
+                            WAITING FOR LIVE AIS
+                        </span>
+
+                    </div>
+
+                </div>
+
+
+                <!-- VESSEL TYPE -->
+
+                <div class="vessel-type-box">
+
+                    <div class="small-label">
+                        VESSEL TYPE
+                    </div>
+
+                    <strong id="panelShipType">
+                        --
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- =============================================
+                 OCEAN SCENE
+            ============================================== -->
+
+            <div class="ocean-scene">
+
+
+                <!-- LIVE STATUS -->
+
+                <div class="scene-status">
+
+                    <span class="scene-live-dot"></span>
+
+                    LIVE VESSEL MOTION
+
+                </div>
+
+
+                <!-- HORIZON -->
+
+                <div class="horizon"></div>
+
+
+                <!-- SUN / GLOW -->
+
+                <div class="sun-glow"></div>
+
+
+                <!-- DISTANT WAVES -->
+
+                <div class="scene-wave scene-wave-back"></div>
+
+                <div class="scene-wave scene-wave-middle"></div>
+
+
+                <!-- =====================================
+                     SHIP
+                ====================================== -->
+
+                <div
+                    id="animatedShip"
+                    class="animated-ship"
+                >
+
+                    <div class="ship-smokestack"></div>
+
+                    <div class="ship-upper"></div>
+
+                    <div class="ship-cabin"></div>
+
+                    <div class="ship-body"></div>
+
+                    <div class="ship-bow"></div>
+
+                </div>
+
+
+                <!-- SHIP WAKE -->
+
+                <div class="ship-wake wake-left"></div>
+
+                <div class="ship-wake wake-right"></div>
+
+
+                <!-- FRONT WAVES -->
+
+                <div class="scene-wave scene-wave-front"></div>
+
+
+                <!-- =====================================
+                     LIVE MOTION INFORMATION
+                ====================================== -->
+
+                <div class="motion-overlay">
+
+
+                    <!-- SPEED -->
+
+                    <div class="motion-item">
+
+                        <span>
+                            SPEED
+                        </span>
+
+                        <strong id="liveSpeed">
+                            --
+                        </strong>
+
+                    </div>
+
+
+                    <!-- COURSE -->
+
+                    <div class="motion-item">
+
+                        <span>
+                            COURSE
+                        </span>
+
+                        <strong id="liveCourse">
+                            --
+                        </strong>
+
+                    </div>
+
+
+                    <!-- POSITION -->
+
+                    <div class="motion-item">
+
+                        <span>
+                            POSITION
+                        </span>
+
+                        <strong id="livePosition">
+                            <span id="liveLat">
+                                --
+                            </span>
+                            /
+                            <span id="liveLon">
+                                --
+                            </span>
+                        </strong>
+
+                    </div>
+
+                </div>
+
+
+                <!--
+                    Hidden compatibility fields.
+
+                    These allow other existing JavaScript/CSS
+                    code that still references the old IDs
+                    to continue working.
+                -->
+
+                <span
+                    id="shipSpeed"
+                    style="display:none;"
+                >
+                    --
+                </span>
+
+                <span
+                    id="shipCourse"
+                    style="display:none;"
+                >
+                    --
+                </span>
+
+                <span
+                    id="shipPosition"
+                    style="display:none;"
+                >
+                    --
+                </span>
+
+                <span
+                    id="liveHeading"
+                    style="display:none;"
+                >
+                    --
+                </span>
+
+                <span
+                    id="monitorLatitude"
+                    style="display:none;"
+                >
+                    --
+                </span>
+
+                <span
+                    id="monitorLongitude"
+                    style="display:none;"
+                >
+                    --
+                </span>
+
+            </div>
+
+
+
+            <!-- =============================================
+                 AI ENGINE CARDS
+            ============================================== -->
+
+            <div class="ai-monitor-grid">
+
+
+                <!-- =========================================
+                     XGBOOST
+                ========================================== -->
+
+                <div class="ai-monitor-card">
+
+                    <div class="ai-card-header">
+
+                        <div class="ai-card-icon storm-icon">
+                            ◉
+                        </div>
+
+                        <div>
+
+                            <span class="small-label">
+                                AI MODEL
+                            </span>
+
+                            <h3>
+                                XGBOOST
+                            </h3>
+
+                        </div>
+
+                        <span class="model-status">
+                            READY
+                        </span>
+
+                    </div>
+
+
+                    <div class="ai-card-body">
+
+                        <div class="prediction-title">
+                            WAVE / STORM HAZARD
+                        </div>
+
+                        <div
+                            id="stormLevel"
+                            class="prediction-value safe"
+                        >
+                            LOW
+                        </div>
+
+
+                        <div class="prediction-bar">
+
+                            <div
+                                id="stormBar"
+                                class="prediction-fill"
+                            ></div>
+
+                        </div>
+
+
+                        <div class="prediction-footer">
+
+                            <span>
+                                Hazard probability
+                            </span>
+
+                            <strong id="stormProbability">
+                                0%
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+
+                <!-- =========================================
+                     LSTM
+                ========================================== -->
+
+                <div class="ai-monitor-card">
+
+                    <div class="ai-card-header">
+
+                        <div class="ai-card-icon lstm-icon">
+                            ≋
+                        </div>
+
+                        <div>
+
+                            <span class="small-label">
+                                AI MODEL
+                            </span>
+
+                            <h3>
+                                LSTM
+                            </h3>
+
+                        </div>
+
+                        <span class="model-status">
+                            READY
+                        </span>
+
+                    </div>
+
+
+                    <div class="ai-card-body">
+
+                        <div class="ai-card-body">
+
+    <div class="prediction-title">
+        WAVE HEIGHT PREDICTION
+    </div>
+
+    <div
+        id="predictionStatus"
+        class="prediction-value safe"
+    >
+        WAITING
+    </div>
+
+    <div class="lstm-values">
+
+        <div>
+
+            <span>
+                PREDICTED VHM0
+            </span>
+
+            <strong id="nextSpeed">
+                -- m
+            </strong>
+
+        </div>
+
+        <div>
+
+            <span>
+                WAVE STATUS
+            </span>
+
+            <strong id="nextCourse">
+                --
+            </strong>
+
+        </div>
+
+    </div>
+
+</div>
+
+                        <div
+                            id="predictionStatus"
+                            class="prediction-value safe"
+                        >
+                            WAITING
+                        </div>
+
+
+                        <div class="lstm-values">
+
+
+                            <div>
+
+                                <span>
+                                    NEXT SPEED
+                                </span>
+
+                                <strong id="nextSpeed">
+                                    --
+                                </strong>
+
+                            </div>
+
+
+                            <div>
+
+                                <span>
+                                    NEXT COURSE
+                                </span>
+
+                                <strong id="nextCourse">
+                                    --
+                                </strong>
+
+                            </div>
+
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+
+                <!-- =========================================
+                     SAFETY
+                ========================================== -->
+
+                <div class="ai-monitor-card safety-card">
+
+                    <div class="ai-card-header">
+
+                        <div class="ai-card-icon safety-icon">
+                            ✓
+                        </div>
+
+                        <div>
+
+                            <span class="small-label">
+                                AI ASSESSMENT
+                            </span>
+
+                            <h3>
+                                VESSEL SAFETY
+                            </h3>
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="safety-result">
+
+                        <div
+                            id="overallRisk"
+                            class="overall-risk"
+                        >
+                            LOW
+                        </div>
+
+                        <span>
+                            CURRENT RISK LEVEL
+                        </span>
+
+                    </div>
+
+
+                    <div class="safety-checks">
+
+
+                        <div class="check-row">
+
+                            <span>
+                                AIS TRACKING
+                            </span>
+
+                            <b>
+                                ACTIVE
+                            </b>
+
+                        </div>
+
+
+                        <div class="check-row">
+
+                            <span>
+                                STORM DETECTION
+                            </span>
+
+                            <b>
+                                ACTIVE
+                            </b>
+
+                        </div>
+
+
+                        <div class="check-row">
+
+                            <span>
+                                MOTION PREDICTION
+                            </span>
+
+                            <b>
+                                ACTIVE
+                            </b>
+
+                        </div>
+
+
+                    </div>
+
+                </div>
+
+
+            </div>
+
+
+
+            <!-- =============================================
+                 CONTINUE TO ROUTE
+            ============================================== -->
+
+            <div class="monitoring-footer-action">
+
+                <div>
+
+                    <div class="small-label">
+                        NEXT SYSTEM STAGE
+                    </div>
+
+                    <h3>
+                        SAFE ROUTE OPTIMIZATION
+                    </h3>
+
+                    <p>
+                        Use the current vessel position and
+                        AI safety analysis to calculate an
+                        optimized route.
+                    </p>
+
+                </div>
+
+
+                <button
+                    id="routeButton"
+                    class="route-button"
+                >
+
+                    <span>
+                        ✦
+                    </span>
+
+                    CONTINUE TO ROUTE OPTIMIZATION
+
+                    <span>
+                        →
+                    </span>
+
+                </button>
+
+            </div>
+
+
+        </section>
+
+    </main>
+
+
+
+    <!-- =====================================================
+         FOOTER
+    ====================================================== -->
+
+    <footer class="monitoring-footer">
+
+        <span>
+            AI MARINE MONITORING SYSTEM
+        </span>
+
+        <span>
+            •
+        </span>
+
+        <span>
+            AIS TRACKING
+        </span>
+
+        <span>
+            •
+        </span>
+
+        <span>
+            XGBOOST
+        </span>
+
+        <span>
+            •
+        </span>
+
+        <span>
+            LSTM
+        </span>
+
+        <span>
+            •
+        </span>
+
+        <span>
+            SAFE ROUTING
+        </span>
+
+    </footer>
+
+
+
+    <!-- =====================================================
+         JAVASCRIPT
+    ====================================================== -->
+
+    <script src="monitoring.js"></script>
+
+
+</body>
+
+</html>

@@ -1,0 +1,1186 @@
+/* =========================================================
+   AI MARINE MONITORING
+   VESSEL MONITORING PAGE
+========================================================= */
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    min-height: 100%;
+    font-family: "Segoe UI", Arial, sans-serif;
+    color: #eef8ff;
+    background: #031521;
+}
+
+body {
+    overflow-x: hidden;
+}
+
+
+/* =========================================================
+   BACKGROUND
+========================================================= */
+
+.monitoring-background {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    z-index: -10;
+
+    background:
+        radial-gradient(
+            circle at 50% 30%,
+            rgba(0, 174, 239, 0.12),
+            transparent 40%
+        ),
+        linear-gradient(
+            180deg,
+            #041622 0%,
+            #062536 48%,
+            #03151f 100%
+        );
+}
+
+
+/* moving ocean waves */
+
+.monitoring-wave {
+    position: absolute;
+    width: 160%;
+    height: 180px;
+    left: -30%;
+    bottom: -40px;
+    border-radius: 50%;
+    border-top: 1px solid rgba(53, 210, 255, 0.18);
+}
+
+.wave-one {
+    animation: oceanMove 13s linear infinite;
+}
+
+.wave-two {
+    bottom: 20px;
+    opacity: 0.5;
+    animation: oceanMove 18s linear infinite reverse;
+}
+
+.wave-three {
+    bottom: 90px;
+    opacity: 0.25;
+    animation: oceanMove 24s linear infinite;
+}
+
+@keyframes oceanMove {
+    0% {
+        transform: translateX(-5%);
+    }
+
+    50% {
+        transform: translateX(5%);
+    }
+
+    100% {
+        transform: translateX(-5%);
+    }
+}
+
+
+/* particles */
+
+.sea-particle {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: #27d5ff;
+    opacity: 0.45;
+    box-shadow: 0 0 12px #27d5ff;
+    animation: particleFloat 8s infinite ease-in-out;
+}
+
+.particle-one {
+    left: 12%;
+    top: 35%;
+}
+
+.particle-two {
+    left: 82%;
+    top: 28%;
+    animation-delay: 2s;
+}
+
+.particle-three {
+    left: 70%;
+    top: 70%;
+    animation-delay: 4s;
+}
+
+.particle-four {
+    left: 25%;
+    top: 72%;
+    animation-delay: 1s;
+}
+
+.particle-five {
+    left: 90%;
+    top: 60%;
+    animation-delay: 5s;
+}
+
+@keyframes particleFloat {
+    0%,
+    100% {
+        transform: translateY(0);
+        opacity: 0.2;
+    }
+
+    50% {
+        transform: translateY(-35px);
+        opacity: 0.7;
+    }
+}
+
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+.monitoring-header {
+    height: 86px;
+    padding: 0 44px;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    background: rgba(2, 18, 29, 0.88);
+    border-bottom: 1px solid rgba(51, 190, 231, 0.12);
+    backdrop-filter: blur(12px);
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.brand-mark {
+    width: 46px;
+    height: 46px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 13px;
+
+    background: linear-gradient(
+        135deg,
+        #19d5ff,
+        #0a8fc2
+    );
+
+    color: white;
+    font-size: 25px;
+    font-weight: 900;
+
+    box-shadow:
+        0 0 25px rgba(24, 207, 255, 0.25);
+}
+
+.brand-title {
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: 1.2px;
+}
+
+.brand-subtitle {
+    margin-top: 3px;
+    color: #77a6ba;
+    font-size: 11px;
+    letter-spacing: 0.7px;
+}
+
+.monitoring-status {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+
+    color: #8daab8;
+    font-size: 12px;
+    letter-spacing: 1px;
+}
+
+.status-dot,
+.scene-live-dot {
+    width: 8px;
+    height: 8px;
+
+    display: inline-block;
+
+    border-radius: 50%;
+
+    background: #25e995;
+
+    box-shadow:
+        0 0 12px rgba(37, 233, 149, 0.8);
+}
+
+.status-divider {
+    width: 1px;
+    height: 18px;
+    background: rgba(255, 255, 255, 0.15);
+    margin: 0 8px;
+}
+
+
+/* =========================================================
+   MAIN
+========================================================= */
+
+.monitoring-main {
+    width: min(1380px, calc(100% - 60px));
+    margin: 0 auto;
+    padding: 35px 0 25px;
+}
+
+.monitoring-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+
+    margin-bottom: 20px;
+}
+
+.eyebrow,
+.small-label {
+    color: #6f9cad;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.4px;
+}
+
+.monitoring-title h1 {
+    margin: 5px 0 4px;
+
+    font-size: 29px;
+    letter-spacing: 1px;
+}
+
+.monitoring-title p {
+    margin: 0;
+
+    color: #789aaa;
+    font-size: 13px;
+}
+
+.live-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    padding: 9px 15px;
+
+    border: 1px solid rgba(37, 233, 149, 0.2);
+    border-radius: 20px;
+
+    background: rgba(37, 233, 149, 0.06);
+
+    color: #5ed9ad;
+
+    font-size: 11px;
+    font-weight: 800;
+}
+
+
+/* =========================================================
+   MAIN CARD
+========================================================= */
+
+.monitoring-card {
+    border: 1px solid rgba(55, 186, 225, 0.17);
+    border-radius: 20px;
+
+    background:
+        linear-gradient(
+            145deg,
+            rgba(7, 37, 52, 0.96),
+            rgba(3, 23, 34, 0.96)
+        );
+
+    box-shadow:
+        0 30px 80px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+    /*
+       IMPORTANT:
+       Do NOT use overflow:hidden here.
+       The page needs to remain naturally scrollable.
+    */
+    overflow: visible;
+}
+
+
+/* =========================================================
+   VESSEL HEADER
+========================================================= */
+
+.vessel-header {
+    min-height: 105px;
+
+    padding: 22px 25px;
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.vessel-main-info {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.large-ship-icon {
+    width: 55px;
+    height: 55px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 15px;
+
+    background: rgba(16, 173, 221, 0.09);
+    border: 1px solid rgba(24, 193, 237, 0.18);
+
+    font-size: 28px;
+}
+
+.vessel-main-info h2 {
+    margin: 4px 0;
+
+    font-size: 21px;
+    letter-spacing: 0.7px;
+}
+
+.mmsi-text {
+    color: #668c9d;
+    font-size: 11px;
+}
+
+.vessel-type-box {
+    min-width: 160px;
+
+    padding: 11px 15px;
+
+    border-radius: 10px;
+
+    background: rgba(0, 0, 0, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.vessel-type-box strong {
+    display: block;
+    margin-top: 5px;
+
+    font-size: 12px;
+}
+
+
+/* =========================================================
+   OCEAN SCENE
+========================================================= */
+
+.ocean-scene {
+    height: 385px;
+    position: relative;
+
+    /*
+       This overflow:hidden is OK.
+       It only clips the ocean animation,
+       not the whole page.
+    */
+    overflow: hidden;
+
+    background:
+        linear-gradient(
+            180deg,
+            #0a3042 0%,
+            #0b4b61 48%,
+            #062d3d 100%
+        );
+}
+
+.horizon {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 43%;
+
+    height: 1px;
+
+    background: rgba(177, 234, 255, 0.28);
+
+    box-shadow:
+        0 0 25px rgba(100, 210, 255, 0.25);
+}
+
+.sun-glow {
+    position: absolute;
+
+    width: 180px;
+    height: 180px;
+
+    top: 20px;
+    right: 15%;
+
+    border-radius: 50%;
+
+    background:
+        radial-gradient(
+            circle,
+            rgba(255, 220, 146, 0.2),
+            transparent 65%
+        );
+}
+
+
+/* waves */
+
+.scene-wave {
+    position: absolute;
+
+    left: -10%;
+    width: 120%;
+    height: 80px;
+
+    border-radius: 50% 50% 0 0;
+
+    border-top: 2px solid rgba(105, 218, 245, 0.15);
+}
+
+.scene-wave-back {
+    top: 45%;
+    animation: sceneWave 7s infinite ease-in-out;
+}
+
+.scene-wave-middle {
+    top: 54%;
+    opacity: 0.7;
+
+    animation: sceneWave 10s infinite ease-in-out reverse;
+}
+
+.scene-wave-front {
+    bottom: -25px;
+    height: 130px;
+
+    opacity: 0.65;
+
+    animation: sceneWave 12s infinite ease-in-out;
+}
+
+@keyframes sceneWave {
+    0%,
+    100% {
+        transform: translateX(-3%);
+    }
+
+    50% {
+        transform: translateX(3%);
+    }
+}
+
+
+/* =========================================================
+   CSS SHIP
+========================================================= */
+
+.animated-ship {
+    position: absolute;
+
+    left: 50%;
+    top: 48%;
+
+    width: 185px;
+    height: 120px;
+
+    transform: translate(-50%, -50%);
+
+    animation: shipFloat 3.5s infinite ease-in-out;
+
+    filter:
+        drop-shadow(
+            0 20px 15px rgba(0, 0, 0, 0.3)
+        );
+}
+
+@keyframes shipFloat {
+    0%,
+    100% {
+        transform:
+            translate(-50%, -50%)
+            rotate(-1deg);
+    }
+
+    50% {
+        transform:
+            translate(-50%, -56%)
+            rotate(1deg);
+    }
+}
+
+.ship-body {
+    position: absolute;
+
+    left: 25px;
+    bottom: 23px;
+
+    width: 135px;
+    height: 48px;
+
+    background: #d7e8ee;
+
+    clip-path: polygon(
+        0 0,
+        100% 0,
+        85% 100%,
+        15% 100%
+    );
+
+    border-bottom: 7px solid #1588a8;
+}
+
+.ship-upper {
+    position: absolute;
+
+    left: 52px;
+    bottom: 67px;
+
+    width: 80px;
+    height: 35px;
+
+    background: #dcebef;
+
+    border-radius: 5px 5px 0 0;
+}
+
+.ship-cabin {
+    position: absolute;
+
+    left: 68px;
+    bottom: 101px;
+
+    width: 50px;
+    height: 28px;
+
+    background: #b8d0d9;
+
+    border-radius: 3px;
+}
+
+.ship-smokestack {
+    position: absolute;
+
+    left: 98px;
+    bottom: 127px;
+
+    width: 14px;
+    height: 28px;
+
+    background: #304c58;
+
+    border-radius: 2px 2px 0 0;
+}
+
+.ship-bow {
+    position: absolute;
+
+    right: 20px;
+    bottom: 33px;
+
+    width: 40px;
+    height: 22px;
+
+    background: #e4f0f3;
+
+    clip-path: polygon(
+        0 0,
+        100% 50%,
+        0 100%
+    );
+}
+
+
+/* wake */
+
+.ship-wake {
+    position: absolute;
+
+    top: 67%;
+
+    width: 160px;
+    height: 8px;
+
+    border-radius: 50%;
+
+    background: rgba(202, 247, 255, 0.22);
+
+    filter: blur(2px);
+
+    animation: wakeMove 3s infinite ease-in-out;
+}
+
+.wake-left {
+    left: calc(50% - 160px);
+}
+
+.wake-right {
+    left: 50%;
+}
+
+@keyframes wakeMove {
+    0%,
+    100% {
+        transform: scaleX(0.8);
+        opacity: 0.25;
+    }
+
+    50% {
+        transform: scaleX(1.15);
+        opacity: 0.6;
+    }
+}
+
+
+/* =========================================================
+   SCENE STATUS
+========================================================= */
+
+.scene-status {
+    position: absolute;
+
+    top: 18px;
+    left: 20px;
+
+    z-index: 5;
+
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    padding: 8px 12px;
+
+    border-radius: 8px;
+
+    background: rgba(1, 19, 28, 0.65);
+
+    border: 1px solid rgba(255, 255, 255, 0.08);
+
+    color: #8eb4c3;
+
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+}
+
+
+/* =========================================================
+   MOTION DATA
+========================================================= */
+
+.motion-overlay {
+    position: absolute;
+
+    left: 20px;
+    right: 20px;
+    bottom: 18px;
+
+    z-index: 5;
+
+    display: flex;
+    gap: 10px;
+}
+
+.motion-item {
+    min-width: 150px;
+
+    padding: 10px 13px;
+
+    border-radius: 9px;
+
+    background: rgba(1, 17, 26, 0.72);
+
+    border: 1px solid rgba(255, 255, 255, 0.07);
+
+    backdrop-filter: blur(5px);
+}
+
+.motion-item span {
+    display: block;
+
+    color: #759aa9;
+
+    font-size: 9px;
+    letter-spacing: 1px;
+}
+
+.motion-item strong {
+    display: block;
+
+    margin-top: 4px;
+
+    font-size: 13px;
+}
+
+
+/* =========================================================
+   AI CARDS
+========================================================= */
+
+.ai-monitor-grid {
+    display: grid;
+
+    grid-template-columns:
+        1fr
+        1fr
+        1fr;
+
+    gap: 14px;
+
+    padding: 18px 20px;
+}
+
+.ai-monitor-card {
+    min-height: 210px;
+
+    padding: 17px;
+
+    border-radius: 13px;
+
+    background:
+        linear-gradient(
+            145deg,
+            rgba(7, 35, 49, 0.95),
+            rgba(3, 24, 35, 0.95)
+        );
+
+    border: 1px solid rgba(55, 183, 222, 0.12);
+}
+
+.ai-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    padding-bottom: 13px;
+
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ai-card-icon {
+    width: 38px;
+    height: 38px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 10px;
+
+    font-size: 19px;
+    font-weight: 900;
+}
+
+.storm-icon {
+    background: rgba(255, 185, 64, 0.1);
+    color: #ffbd4b;
+}
+
+.lstm-icon {
+    background: rgba(75, 189, 255, 0.1);
+    color: #4ccfff;
+}
+
+.safety-icon {
+    background: rgba(39, 229, 148, 0.1);
+    color: #39e99a;
+}
+
+.ai-card-header h3 {
+    margin: 3px 0 0;
+
+    font-size: 14px;
+}
+
+.model-status {
+    margin-left: auto;
+
+    padding: 4px 8px;
+
+    border-radius: 10px;
+
+    color: #42e89c;
+
+    background: rgba(42, 228, 151, 0.07);
+
+    font-size: 8px;
+    font-weight: 900;
+    letter-spacing: 1px;
+}
+
+.ai-card-body {
+    padding-top: 17px;
+}
+
+.prediction-title {
+    color: #7598a7;
+
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+}
+
+.prediction-value {
+    margin: 10px 0;
+
+    font-size: 27px;
+    font-weight: 900;
+}
+
+.prediction-value.safe {
+    color: #38e99a;
+}
+
+.prediction-bar {
+    height: 5px;
+
+    overflow: hidden;
+
+    border-radius: 5px;
+
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.prediction-fill {
+    width: 8%;
+    height: 100%;
+
+    border-radius: inherit;
+
+    background: #35e99a;
+
+    transition: width 0.5s ease;
+}
+
+.prediction-footer {
+    display: flex;
+    justify-content: space-between;
+
+    margin-top: 10px;
+
+    color: #708f9c;
+
+    font-size: 10px;
+}
+
+.prediction-footer strong {
+    color: #d8edf5;
+}
+
+.lstm-values {
+    display: flex;
+    gap: 12px;
+
+    margin-top: 18px;
+}
+
+.lstm-values > div {
+    flex: 1;
+
+    padding: 11px;
+
+    border-radius: 8px;
+
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.lstm-values span {
+    display: block;
+
+    color: #698d9c;
+
+    font-size: 8px;
+    letter-spacing: 0.8px;
+}
+
+.lstm-values strong {
+    display: block;
+
+    margin-top: 5px;
+
+    font-size: 14px;
+}
+
+
+/* =========================================================
+   SAFETY
+========================================================= */
+
+.safety-result {
+    text-align: center;
+
+    padding: 17px 0 13px;
+}
+
+.overall-risk {
+    color: #38e99a;
+
+    font-size: 31px;
+    font-weight: 900;
+}
+
+.safety-result span {
+    color: #668b9b;
+
+    font-size: 9px;
+    letter-spacing: 1px;
+}
+
+.safety-checks {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.check-row {
+    display: flex;
+    justify-content: space-between;
+
+    padding: 8px 0;
+
+    color: #7696a3;
+
+    font-size: 9px;
+}
+
+.check-row b {
+    color: #3ee49a;
+
+    font-size: 8px;
+}
+
+
+/* =========================================================
+   ROUTE ACTION
+========================================================= */
+
+.monitoring-footer-action {
+    margin: 0 20px 20px;
+    padding: 18px 20px;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+
+    border-radius: 12px;
+
+    background:
+        linear-gradient(
+            90deg,
+            rgba(13, 107, 139, 0.15),
+            rgba(12, 68, 91, 0.08)
+        );
+
+    border: 1px solid rgba(41, 186, 226, 0.14);
+}
+
+.monitoring-footer-action h3 {
+    margin: 5px 0;
+
+    font-size: 14px;
+}
+
+.monitoring-footer-action p {
+    margin: 0;
+
+    color: #7595a3;
+
+    font-size: 10px;
+}
+
+.route-button {
+    min-width: 270px;
+
+    padding: 14px 18px;
+
+    border: 0;
+    border-radius: 9px;
+
+    cursor: pointer;
+
+    color: white;
+
+    background:
+        linear-gradient(
+            135deg,
+            #12bfe7,
+            #087da8
+        );
+
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.5px;
+
+    box-shadow:
+        0 8px 25px rgba(0, 164, 211, 0.2);
+
+    transition:
+        transform 0.2s,
+        box-shadow 0.2s;
+}
+
+.route-button:hover {
+    transform: translateY(-2px);
+
+    box-shadow:
+        0 12px 30px rgba(0, 164, 211, 0.32);
+}
+
+
+/* =========================================================
+   FOOTER
+========================================================= */
+
+.monitoring-footer {
+    padding: 14px;
+
+    text-align: center;
+
+    color: #50717f;
+
+    font-size: 8px;
+    letter-spacing: 1.2px;
+
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+
+@media (max-width: 1000px) {
+
+    .ai-monitor-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .monitoring-footer-action {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .route-button {
+        width: 100%;
+    }
+}
+
+
+@media (max-width: 700px) {
+
+    .monitoring-header {
+        padding: 0 18px;
+    }
+
+    .monitoring-status {
+        display: none;
+    }
+
+    .monitoring-main {
+        width: calc(100% - 24px);
+        padding-top: 20px;
+    }
+
+    .monitoring-title {
+        align-items: flex-start;
+        gap: 15px;
+    }
+
+    .vessel-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+
+    .vessel-type-box {
+        width: 100%;
+    }
+
+    .ocean-scene {
+        height: 330px;
+    }
+
+    .motion-overlay {
+        flex-wrap: wrap;
+    }
+
+    .motion-item {
+        min-width: 120px;
+    }
+}
+
+
+/* ============================================================
+   FINAL PAGE SCROLL FIX
+   ============================================================ */
+
+/*
+   IMPORTANT:
+   This block is OUTSIDE all @media blocks.
+   This makes scrolling work on desktop and mobile.
+*/
+
+html {
+    height: auto !important;
+    min-height: 100% !important;
+
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+}
+
+body {
+    height: auto !important;
+    min-height: 100vh !important;
+
+    margin: 0 !important;
+
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+}
+
+.monitoring-page {
+    height: auto !important;
+    min-height: 100vh !important;
+
+    overflow: visible !important;
+}
+
+.monitoring-card {
+    height: auto !important;
+    min-height: 0 !important;
+
+    /*
+       Do not clip the entire monitoring page.
+       Ocean scene still has its own overflow:hidden.
+    */
+    overflow: visible !important;
+}

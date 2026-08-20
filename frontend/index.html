@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>AI Marine Monitoring System</title>
+
+    <link
+        rel="stylesheet"
+        href="styles.css"
+    >
+
+</head>
+
+
+<body>
+
+
+    <!-- =====================================================
+         MARINE BACKGROUND
+    ====================================================== -->
+
+    <div class="ocean-background">
+
+        <div class="wave wave-1"></div>
+        <div class="wave wave-2"></div>
+        <div class="wave wave-3"></div>
+
+        <div class="floating-particle particle-1"></div>
+        <div class="floating-particle particle-2"></div>
+        <div class="floating-particle particle-3"></div>
+        <div class="floating-particle particle-4"></div>
+        <div class="floating-particle particle-5"></div>
+
+    </div>
+
+
+
+    <!-- =====================================================
+         TOP BRAND
+    ====================================================== -->
+
+    <header class="landing-header">
+
+        <div class="brand">
+
+            <div class="brand-mark">
+                ✦
+            </div>
+
+            <div class="brand-text">
+
+                <div class="brand-title">
+                    AI MARINE MONITORING
+                </div>
+
+                <div class="brand-subtitle">
+                    Intelligent Vessel & Route Safety
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <div class="system-status">
+
+            <span class="status-dot"></span>
+
+            SYSTEM READY
+
+        </div>
+
+    </header>
+
+
+
+    <!-- =====================================================
+         MAIN CONTENT
+    ====================================================== -->
+
+    <main class="landing-main">
+
+        <section class="ship-card">
+
+
+            <!-- =================================================
+                 CARD HEADER
+            ================================================== -->
+
+            <div class="ship-card-header">
+
+                <div class="ship-icon">
+                    🚢
+                </div>
+
+                <div>
+
+                    <h1>
+                        SHIP DETAILS
+                    </h1>
+
+                    <p>
+                        Enter vessel information to begin
+                        AI marine monitoring.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- =================================================
+                 SHIP DETAILS FORM
+            ================================================== -->
+
+            <form id="shipDetailsForm">
+
+
+                <!-- =============================================
+                     SHIP NAME
+                ============================================== -->
+
+                <div class="form-group">
+
+                    <label for="shipName">
+                        SHIP NAME
+                    </label>
+
+                    <input
+                        id="shipName"
+                        name="shipName"
+                        type="text"
+                        placeholder="Enter ship name"
+                        autocomplete="off"
+                        required
+                    >
+
+                </div>
+
+
+
+                <!-- =============================================
+                     MMSI
+                ============================================== -->
+
+                <div class="form-group">
+
+                    <label for="mmsi">
+                        MMSI
+                    </label>
+
+                    <input
+                        id="mmsi"
+                        name="mmsi"
+                        type="text"
+                        inputmode="numeric"
+                        maxlength="9"
+                        minlength="9"
+                        pattern="[0-9]{9}"
+                        placeholder="Enter 9-digit MMSI"
+                        autocomplete="off"
+                        required
+                    >
+
+                    <small>
+                        MMSI is used to identify the AIS vessel.
+                    </small>
+
+                </div>
+
+
+
+                <!-- =============================================
+                     SHIP TYPE
+                ============================================== -->
+
+                <div class="form-group">
+
+                    <label for="shipType">
+                        SHIP TYPE
+                    </label>
+
+                    <select
+                        id="shipType"
+                        name="shipType"
+                        required
+                    >
+
+                        <option value="">
+                            Select ship type
+                        </option>
+
+                        <option value="cargo">
+                            Cargo Ship
+                        </option>
+
+                        <option value="tanker">
+                            Tanker
+                        </option>
+
+                        <option value="container">
+                            Container Ship
+                        </option>
+
+                        <option value="passenger">
+                            Passenger Ship
+                        </option>
+
+                        <option value="fishing">
+                            Fishing Vessel
+                        </option>
+
+                        <option value="other">
+                            Other
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+
+                <!-- =================================================
+                     START MONITORING BUTTON
+                ================================================== -->
+
+                <button
+                    type="submit"
+                    id="startMonitoringBtn"
+                    class="start-button"
+                >
+
+                    <span class="button-icon">
+                        ✦
+                    </span>
+
+                    START MONITORING
+
+                    <span class="button-arrow">
+                        →
+                    </span>
+
+                </button>
+
+
+            </form>
+
+
+
+            <!-- =================================================
+                 SYSTEM FEATURES
+            ================================================== -->
+
+            <div class="system-features">
+
+                <div class="feature">
+
+                    <span>
+                        ●
+                    </span>
+
+                    AIS TRACKING
+
+                </div>
+
+
+                <div class="feature">
+
+                    <span>
+                        ●
+                    </span>
+
+                    AI ANALYSIS
+
+                </div>
+
+
+                <div class="feature">
+
+                    <span>
+                        ●
+                    </span>
+
+                    SAFE ROUTING
+
+                </div>
+
+            </div>
+
+
+        </section>
+
+    </main>
+
+
+
+    <!-- =====================================================
+         FOOTER
+    ====================================================== -->
+
+    <footer class="landing-footer">
+
+        <span>
+            AI MARINE MONITORING SYSTEM
+        </span>
+
+        <span>
+            •
+        </span>
+
+        <span>
+            VESSEL SAFETY INTELLIGENCE
+        </span>
+
+    </footer>
+
+
+
+    <!-- =====================================================
+         START MONITORING SCRIPT
+    ====================================================== -->
+
+    <script>
+
+        /*
+         * ====================================================
+         * SHIP DETAILS FORM
+         * ====================================================
+         */
+
+        const form =
+            document.getElementById(
+                "shipDetailsForm"
+            );
+
+
+        const startButton =
+            document.getElementById(
+                "startMonitoringBtn"
+            );
+
+
+
+        /*
+         * ====================================================
+         * FORM SUBMIT
+         * ====================================================
+         */
+
+        form.addEventListener(
+            "submit",
+            function(event) {
+
+                event.preventDefault();
+
+
+
+                /*
+                 * ------------------------------------------------
+                 * READ FORM VALUES
+                 * ------------------------------------------------
+                 */
+
+                const shipName =
+                    document
+                        .getElementById("shipName")
+                        .value
+                        .trim();
+
+
+                const mmsi =
+                    document
+                        .getElementById("mmsi")
+                        .value
+                        .trim();
+
+
+                const shipType =
+                    document
+                        .getElementById("shipType")
+                        .value;
+
+
+
+                /*
+                 * ------------------------------------------------
+                 * VALIDATE SHIP NAME
+                 * ------------------------------------------------
+                 */
+
+                if (!shipName) {
+
+                    alert(
+                        "Please enter the ship name."
+                    );
+
+                    return;
+
+                }
+
+
+
+                /*
+                 * ------------------------------------------------
+                 * VALIDATE MMSI
+                 * ------------------------------------------------
+                 */
+
+                if (!/^\d{9}$/.test(mmsi)) {
+
+                    alert(
+                        "Please enter a valid 9-digit MMSI."
+                    );
+
+                    return;
+
+                }
+
+
+
+                /*
+                 * ------------------------------------------------
+                 * VALIDATE SHIP TYPE
+                 * ------------------------------------------------
+                 */
+
+                if (!shipType) {
+
+                    alert(
+                        "Please select the ship type."
+                    );
+
+                    return;
+
+                }
+
+
+
+                /*
+                 * =================================================
+                 * CREATE VESSEL DETAILS OBJECT
+                 * =================================================
+                 */
+
+                const vesselDetails = {
+
+                    shipName:
+                        shipName,
+
+                    mmsi:
+                        mmsi,
+
+                    shipType:
+                        shipType,
+
+                    startedAt:
+                        new Date().toISOString()
+
+                };
+
+
+
+                /*
+                 * =================================================
+                 * SAVE FOR MONITORING PAGE
+                 * =================================================
+                 *
+                 * sessionStorage is used because these details
+                 * are needed by monitoring.html during this
+                 * monitoring session.
+                 *
+                 * =================================================
+                 */
+
+                sessionStorage.setItem(
+                    "marineShipDetails",
+                    JSON.stringify(
+                        vesselDetails
+                    )
+                );
+
+
+
+                /*
+                 * Also save a copy in localStorage.
+                 *
+                 * This keeps compatibility with the older
+                 * application code.
+                 */
+
+                localStorage.setItem(
+                    "marineVessel",
+                    JSON.stringify(
+                        vesselDetails
+                    )
+                );
+
+
+
+                /*
+                 * =================================================
+                 * BUTTON LOADING STATE
+                 * =================================================
+                 */
+
+                startButton.disabled = true;
+
+
+                startButton.innerHTML =
+                    `
+                    <span class="loading-spinner"></span>
+                    CONNECTING TO MARINE SYSTEM...
+                    `;
+
+
+
+                /*
+                 * =================================================
+                 * OPEN MONITORING PAGE
+                 * =================================================
+                 *
+                 * IMPORTANT:
+                 *
+                 * We are NOT going to dashboard.html.
+                 *
+                 * The new flow is:
+                 *
+                 * index.html
+                 *      ↓
+                 * monitoring.html
+                 *
+                 * =================================================
+                 */
+
+                setTimeout(
+                    function() {
+
+                        window.location.href =
+                            "monitoring.html";
+
+                    },
+                    900
+                );
+
+            }
+        );
+
+    </script>
+
+
+</body>
+
+</html>

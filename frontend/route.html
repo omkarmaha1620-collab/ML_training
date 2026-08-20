@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Safe Route Optimization | AI Marine Monitoring</title>
+
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        crossorigin=""
+    >
+
+    <link rel="stylesheet" href="route.css">
+</head>
+
+
+<body>
+
+    <!-- =====================================================
+         MARINE BACKGROUND
+    ====================================================== -->
+
+    <div class="ocean-background">
+
+        <div class="wave wave-1"></div>
+        <div class="wave wave-2"></div>
+        <div class="wave wave-3"></div>
+
+        <div class="particle particle-1"></div>
+        <div class="particle particle-2"></div>
+        <div class="particle particle-3"></div>
+        <div class="particle particle-4"></div>
+
+    </div>
+
+
+    <!-- =====================================================
+         HEADER
+    ====================================================== -->
+
+    <header class="topbar">
+
+        <div class="brand">
+
+            <div class="brand-mark">
+                ✦
+            </div>
+
+            <div>
+
+                <div class="brand-title">
+                    AI MARINE MONITORING
+                </div>
+
+                <div class="brand-subtitle">
+                    Intelligent Vessel & Route Safety
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <div class="system-status">
+
+            <span class="status-dot"></span>
+
+            ROUTE OPTIMIZATION
+
+        </div>
+
+    </header>
+
+
+    <!-- =====================================================
+         MAIN
+    ====================================================== -->
+
+    <main class="route-page">
+
+
+        <!-- =================================================
+             PAGE TITLE
+        ================================================== -->
+
+        <section class="page-heading">
+
+            <div class="eyebrow">
+                AI NAVIGATION INTELLIGENCE
+            </div>
+
+            <h1>
+                SAFE ROUTE OPTIMIZATION
+            </h1>
+
+            <p>
+                Generate an ocean-safe route using vessel position,
+                coastline data, port data and AI hazard intelligence.
+            </p>
+
+        </section>
+
+
+        <!-- =================================================
+             CONTENT
+        ================================================== -->
+
+        <section class="route-layout">
+
+
+            <!-- =================================================
+                 LEFT CONTROL PANEL
+            ================================================== -->
+
+            <aside class="route-panel">
+
+
+                <!-- VESSEL -->
+
+                <div class="panel-card">
+
+                    <div class="card-title">
+                        <span>🚢</span>
+                        VESSEL
+                    </div>
+
+
+                    <div class="vessel-box">
+
+                        <div class="vessel-icon">
+                            🚢
+                        </div>
+
+                        <div>
+
+                            <div
+                                id="shipName"
+                                class="ship-name"
+                            >
+                                OCEAN EXPLORER
+                            </div>
+
+                            <div
+                                id="mmsi"
+                                class="ship-mmsi"
+                            >
+                                MMSI 999000001
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- CURRENT POSITION -->
+
+                <div class="panel-card">
+
+                    <div class="card-title">
+                        CURRENT VESSEL POSITION
+                    </div>
+
+
+                    <div class="coordinate-grid">
+
+                        <div class="coordinate">
+
+                            <label>
+                                LATITUDE
+                            </label>
+
+                            <input
+                                id="currentLat"
+                                type="number"
+                                step="0.0001"
+                                value="12.8500"
+                            >
+
+                        </div>
+
+
+                        <div class="coordinate">
+
+                            <label>
+                                LONGITUDE
+                            </label>
+
+                            <input
+                                id="currentLon"
+                                type="number"
+                                step="0.0001"
+                                value="76.8000"
+                            >
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- DESTINATION -->
+
+                <div class="panel-card">
+
+                    <div class="card-title">
+                        DESTINATION
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label for="destLat">
+                            DESTINATION LATITUDE
+                        </label>
+
+                        <input
+                            id="destLat"
+                            type="number"
+                            step="0.0001"
+                            placeholder="13.5000"
+                        >
+
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label for="destLon">
+                            DESTINATION LONGITUDE
+                        </label>
+
+                        <input
+                            id="destLon"
+                            type="number"
+                            step="0.0001"
+                            placeholder="82.0000"
+                        >
+
+                    </div>
+
+                </div>
+
+
+                <!-- AI ENGINE -->
+
+                <div class="panel-card ai-engine-card">
+
+                    <div class="card-title">
+                        AI ROUTING ENGINE
+                    </div>
+
+
+                    <div class="engine-item">
+
+                        <span>
+                            ROUTE OPTIMIZER
+                        </span>
+
+                        <strong>
+                            PPO
+                        </strong>
+
+                    </div>
+
+
+                    <div class="engine-item">
+
+                        <span>
+                            HAZARD MODEL
+                        </span>
+
+                        <strong>
+                            XGBOOST
+                        </strong>
+
+                    </div>
+
+
+                    <div class="engine-item">
+
+                        <span>
+                            VESSEL PREDICTION
+                        </span>
+
+                        <strong>
+                            LSTM
+                        </strong>
+
+                    </div>
+
+
+                    <div class="engine-item">
+
+                        <span>
+                            MARINE DATA
+                        </span>
+
+                        <strong>
+                            AIS
+                        </strong>
+
+                    </div>
+
+                </div>
+
+
+                <!-- BUTTON -->
+
+                <button
+                    id="optimizeBtn"
+                    class="optimize-button"
+                >
+
+                    <span>
+                        ✦
+                    </span>
+
+                    OPTIMIZE SAFE ROUTE
+
+                    <span>
+                        →
+                    </span>
+
+                </button>
+
+
+                <button
+                    id="backBtn"
+                    class="back-button"
+                >
+                    ← BACK TO MONITORING
+                </button>
+
+
+                <!-- STATUS -->
+
+                <div
+                    id="routeStatus"
+                    class="route-status"
+                >
+
+                    Enter a destination and optimize
+                    an ocean-safe route.
+
+                </div>
+
+            </aside>
+
+
+            <!-- =================================================
+                 MAP
+            ================================================== -->
+
+            <section class="map-container">
+
+                <div id="routeMap"></div>
+
+
+                <!-- MAP LABEL -->
+
+                <div class="map-title">
+
+                    <strong>
+                        MARINE ROUTE MAP
+                    </strong>
+
+                    <span>
+                        AI NAVIGATION
+                    </span>
+
+                </div>
+
+
+                <!-- MAP LEGEND -->
+
+                <div class="map-legend">
+
+                    <div class="legend-title">
+                        ROUTE LEGEND
+                    </div>
+
+                    <div>
+                        <span class="legend-dot vessel"></span>
+                        VESSEL
+                    </div>
+
+                    <div>
+                        <span class="legend-dot destination"></span>
+                        DESTINATION
+                    </div>
+
+                    <div>
+                        <span class="legend-line safe"></span>
+                        SAFE ROUTE
+                    </div>
+
+                    <div>
+                        <span class="legend-dot hazard"></span>
+                        HAZARD
+                    </div>
+
+                </div>
+
+
+                <!-- CALCULATING -->
+
+                <div
+                    id="calculating"
+                    class="calculating hidden"
+                >
+
+                    <div class="spinner"></div>
+
+                    <div>
+                        CALCULATING SAFE ROUTE...
+                    </div>
+
+                    <small>
+                        PPO navigation intelligence active
+                    </small>
+
+                </div>
+
+            </section>
+
+        </section>
+
+
+        <!-- =================================================
+             ROUTE RESULT
+        ================================================== -->
+
+        <section
+            id="routeResult"
+            class="route-result hidden"
+        >
+
+            <div class="result-header">
+
+                <div>
+
+                    <div class="eyebrow">
+                        AI ROUTING RESULT
+                    </div>
+
+                    <h2>
+                       <span id="routeModeTitle">OPTIMIZED ROUTE GENERATED</span>
+                    </h2>
+
+                </div>
+
+                <div class="safe-badge">
+                    ● OCEAN SAFE
+                </div>
+
+            </div>
+
+
+            <div class="result-grid">
+
+
+                <div class="result-card">
+
+                    <span>
+                        TOTAL DISTANCE
+                    </span>
+
+                    <strong id="resultDistance">
+                        -- km
+                    </strong>
+
+                </div>
+
+
+                <div class="result-card">
+
+                    <span>
+                        ESTIMATED TIME
+                    </span>
+
+                    <strong id="resultTime">
+                        -- h
+                    </strong>
+
+                </div>
+
+
+                <div class="result-card">
+
+                    <span>
+                        ROUTE RISK
+                    </span>
+
+                    <strong
+                        id="resultRisk"
+                        class="safe-text"
+                        >
+                        LOW
+                    </strong>
+
+                </div>
+<div class="result-card">
+
+    <span>
+        ROUTE MODE
+    </span>
+
+    <strong
+        id="resultRouteMode"
+        class="safe-text"
+    >
+        OPTIMIZED
+    </strong>
+
+</div>
+
+
+<div class="result-card">
+
+    <span>
+        HAZARD STATUS
+    </span>
+
+    <strong
+        id="resultHazard"
+        class="safe-text"
+    >
+        NO_WAVE_DATA
+    </strong>
+
+</div>
+
+                <div class="result-card">
+
+                    <span>
+                        HAZARD AVOIDANCE
+                    </span>
+
+                    <strong>
+                        ENABLED
+                    </strong>
+
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+    <!-- =====================================================
+         LEAFLET
+    ====================================================== -->
+
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        crossorigin=""
+    ></script>
+
+    <script src="route.js"></script>
+
+</body>
+
+</html>

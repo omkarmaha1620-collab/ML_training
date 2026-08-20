@@ -1,0 +1,15 @@
+Metric,Value
+Unseen test routes,76.0
+Unseen test vessels,11.0
+Historical AIS mean distance (km),74.45315367927489
+Direct baseline mean distance (km),61.80263157894737
+PPO mean distance (km),61.828947368421055
+PPO improvement vs historical (%),16.95590540762811
+PPO change vs baseline (%),0.042580370449224116
+PPO shorter routes,9.0
+PPO longer routes,9.0
+Equal routes,58.0
+PPO destination success (%),100.0
+Baseline destination success (%),100.0
+PPO mean turning (degrees),273.5193415692456
+PPO median turning (degrees),51.96491789426682

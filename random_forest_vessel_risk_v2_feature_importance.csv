@@ -1,0 +1,9 @@
+feature,importance
+distances.endDistanceFromShoreKm,0.2581494775202535
+distances.startDistanceFromShoreKm,0.24982817494181664
+distances.startDistanceFromPortKm,0.1528404514741273
+distances.endDistanceFromPortKm,0.14578510293747046
+position.lon,0.10147721838422306
+position.lat,0.04665257717680846
+fishing.averageSpeedKnots,0.030958419329876845
+fishing.totalDistanceKm,0.014308578235423603
