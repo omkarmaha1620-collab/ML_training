@@ -1,6 +1,6 @@
 # 🌊 AI Marine Monitoring System
 
-An **AI-based Marine Monitoring and Risk Prediction System** that combines Machine Learning, Deep Learning, Reinforcement Learning, geospatial data, and a web-based monitoring interface for intelligent maritime analysis.
+An **AI-based Marine Monitoring and Risk Prediction System** that combines Machine Learning, Reinforcement Learning, geospatial data, and a web-based monitoring interface for intelligent maritime analysis.
 
 ## 🚢 Project Overview
 
