@@ -475,123 +475,86 @@
 
 
                 <!-- =========================================
-                     LSTM
-                ========================================== -->
+     LSTM
+========================================== -->
 
-                <div class="ai-monitor-card">
+<div class="ai-monitor-card">
 
-                    <div class="ai-card-header">
+    <div class="ai-card-header">
 
-                        <div class="ai-card-icon lstm-icon">
-                            ≋
-                        </div>
-
-                        <div>
-
-                            <span class="small-label">
-                                AI MODEL
-                            </span>
-
-                            <h3>
-                                LSTM
-                            </h3>
-
-                        </div>
-
-                        <span class="model-status">
-                            READY
-                        </span>
-
-                    </div>
-
-
-                    <div class="ai-card-body">
-
-                        <div class="ai-card-body">
-
-    <div class="prediction-title">
-        WAVE HEIGHT PREDICTION
-    </div>
-
-    <div
-        id="predictionStatus"
-        class="prediction-value safe"
-    >
-        WAITING
-    </div>
-
-    <div class="lstm-values">
-
-        <div>
-
-            <span>
-                PREDICTED VHM0
-            </span>
-
-            <strong id="nextSpeed">
-                -- m
-            </strong>
-
+        <div class="ai-card-icon lstm-icon">
+            ≋
         </div>
 
         <div>
 
-            <span>
-                WAVE STATUS
+            <span class="small-label">
+                AI MODEL
             </span>
 
-            <strong id="nextCourse">
-                --
-            </strong>
+            <h3>
+                LSTM
+            </h3>
+
+        </div>
+
+        <span class="model-status">
+            READY
+        </span>
+
+    </div>
+
+
+    <!-- LSTM RESULT -->
+
+    <div class="ai-card-body">
+
+        <div class="prediction-title">
+            WAVE HEIGHT PREDICTION
+        </div>
+
+
+        <!-- MAIN LSTM STATUS -->
+
+        <div
+            id="lstmStatus"
+            class="prediction-value safe"
+        >
+            WAITING
+        </div>
+
+
+        <!-- LSTM VALUES -->
+
+        <div class="lstm-values">
+
+            <!-- PREDICTED WAVE HEIGHT -->
+
+            <div>
+
+                <span>
+                    PREDICTED VHM0
+                </span>
+
+                <strong id="lstmPrediction">
+                    -- m
+                </strong>
+
+            </div>
+
+
+            <!-- WAVE STATUS -->
+
+            <div>
+    <span>WAVE STATUS</span>
+    <strong id="lstmWaveStatus">--</strong>
+</div>
 
         </div>
 
     </div>
 
 </div>
-
-                        <div
-                            id="predictionStatus"
-                            class="prediction-value safe"
-                        >
-                            WAITING
-                        </div>
-
-
-                        <div class="lstm-values">
-
-
-                            <div>
-
-                                <span>
-                                    NEXT SPEED
-                                </span>
-
-                                <strong id="nextSpeed">
-                                    --
-                                </strong>
-
-                            </div>
-
-
-                            <div>
-
-                                <span>
-                                    NEXT COURSE
-                                </span>
-
-                                <strong id="nextCourse">
-                                    --
-                                </strong>
-
-                            </div>
-
-
-                        </div>
-
-                    </div>
-
-                </div>
 
 
 
@@ -790,7 +753,7 @@
          JAVASCRIPT
     ====================================================== -->
 
-    <script src="monitoring.js"></script>
+    <script src="monitoring.js?v=4"></script>
 
 
 </body>

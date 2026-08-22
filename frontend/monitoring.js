@@ -1399,9 +1399,21 @@ function updateStormDisplay(
     );
 
 
+    // --------------------------------------------------------
+    // DISPLAY XGBOOST PROBABILITY USING 50% DECISION THRESHOLD
+    // --------------------------------------------------------
+
+    let probabilityDisplay;
+
+    if (probability < 50) {
+        probabilityDisplay = "<50%";
+    } else {
+        probabilityDisplay = `${probability.toFixed(1)}%`;
+    }
+
     setText(
         "waveProbability",
-        `${probability.toFixed(1)}%`
+        probabilityDisplay
     );
 
 
@@ -1477,64 +1489,29 @@ function updateStormDisplay(
     );
 }
 
-
 // ============================================================
-// NDBC XGBOOST STORM PREDICTION
+// NDBC XGBOOST LIVE RESULT
+// ============================================================
+// Backend already maintains:
+// - latest 3 NDBC observations
+// - 24 XGBoost features
+// - trained XGBoost model
 //
-// BACKEND FLOW:
-//
-// GET /ndbc/observations
-//          |
-//          v
-// 3 observations
-//          |
-//          v
-// POST /predict/high-wave
-//          |
-//          v
-// NDBC XGBoost
-//          |
-//          +---- HIGH_WAVE
-//          |
-//          +---- NORMAL
+// Frontend only needs to GET the completed result.
 // ============================================================
 
 async function getNDBCStormPrediction() {
 
-    const vessel =
-        currentVessel;
-
-
-    if (!vessel) {
-
-        console.warn(
-            "NDBC: No current vessel selected."
-        );
-
-        return null;
-    }
-
-
     try {
 
         console.log(
-            "================================================"
+            "FETCHING LIVE NDBC XGBOOST RESULT..."
         );
 
 
-        console.log(
-            "FETCHING LIVE NDBC OBSERVATIONS..."
-        );
-
-
-        // ----------------------------------------------------
-        // STEP 1
-        // GET NDBC OBSERVATIONS
-        // ----------------------------------------------------
-
-        const ndbcResponse =
+        const response =
             await fetch(
-                `${API_BASE}/ndbc/observations?t=${Date.now()}`,
+                `${API_BASE}/wave/ndbc/xgboost?t=${Date.now()}`,
                 {
                     method:
                         "GET",
@@ -1550,199 +1527,17 @@ async function getNDBCStormPrediction() {
             );
 
 
-        if (
-            !ndbcResponse.ok
-        ) {
+        if (!response.ok) {
 
             throw new Error(
-                `NDBC observations returned ` +
-                `${ndbcResponse.status}`
-            );
-        }
-
-
-        const ndbcData =
-            await ndbcResponse.json();
-
-
-        console.log(
-            "NDBC DATA:",
-            ndbcData
-        );
-
-
-        // ----------------------------------------------------
-        // STEP 2
-        // EXTRACT OBSERVATIONS
-        // ----------------------------------------------------
-
-        const observations =
-            Array.isArray(
-                ndbcData.observations
-            )
-                ? ndbcData.observations
-                : Array.isArray(
-                    ndbcData.data
-                )
-                    ? ndbcData.data
-                    : [];
-
-
-        if (
-            observations.length <
-            3
-        ) {
-
-            throw new Error(
-                "NDBC returned fewer than " +
-                "3 observations."
-            );
-        }
-
-
-        // ----------------------------------------------------
-        // STEP 3
-        // USE EXACTLY 3 OBSERVATIONS
-        // ----------------------------------------------------
-
-        const latestThree =
-            observations.slice(
-                -3
+                `NDBC XGBoost returned ${response.status}`
             );
 
-
-        if (
-            latestThree.length !==
-            3
-        ) {
-
-            throw new Error(
-                "NDBC XGBoost requires " +
-                "exactly 3 observations."
-            );
-        }
-
-
-        // ----------------------------------------------------
-        // STEP 4
-        // REQUIRED MODEL FEATURES
-        // ----------------------------------------------------
-
-        const requiredFeatures = [
-
-            "WVHT",
-
-            "WSPD",
-
-            "GST",
-
-            "DPD",
-
-            "APD",
-
-            "PRES",
-
-            "ATMP",
-
-            "WTMP"
-
-        ];
-
-
-        const valid =
-            latestThree.every(
-                observation => {
-
-                    return requiredFeatures.every(
-                        feature => {
-
-                            return Number.isFinite(
-                                Number(
-                                    observation[
-                                        feature
-                                    ]
-                                )
-                            );
-
-                        }
-                    );
-
-                }
-            );
-
-
-        if (!valid) {
-
-            throw new Error(
-                "NDBC observations contain " +
-                "missing or invalid features."
-            );
-        }
-
-
-        console.log(
-            "NDBC 3 OBSERVATIONS:",
-            latestThree
-        );
-
-
-        // ----------------------------------------------------
-        // STEP 5
-        // CALL NDBC XGBOOST
-        // ----------------------------------------------------
-
-        console.log(
-            "CALLING NDBC XGBOOST..."
-        );
-
-
-        const stormResponse =
-            await fetch(
-                `${API_BASE}/predict/high-wave`,
-                {
-                    method:
-                        "POST",
-
-                    headers: {
-
-                        "Content-Type":
-                            "application/json",
-
-                        "Accept":
-                            "application/json"
-
-                    },
-
-                    cache:
-                        "no-store",
-
-                    body:
-                        JSON.stringify({
-                            observations:
-                                latestThree
-                        })
-                }
-            );
-
-
-        if (
-            !stormResponse.ok
-        ) {
-
-            const errorText =
-                await stormResponse.text();
-
-
-            throw new Error(
-                `NDBC XGBoost returned ` +
-                `${stormResponse.status}: ` +
-                errorText
-            );
         }
 
 
         const storm =
-            await stormResponse.json();
+            await response.json();
 
 
         console.log(
@@ -1752,33 +1547,99 @@ async function getNDBCStormPrediction() {
 
 
         // ----------------------------------------------------
-        // STEP 6
+        // WAITING
+        // ----------------------------------------------------
+
+        if (
+            storm.status ===
+            "waiting"
+        ) {
+
+            setText(
+                "waveRisk",
+                "WAITING"
+            );
+
+            setText(
+                "waveProbability",
+                "--"
+            );
+
+            setText(
+                "xgbStatus",
+                `NDBC HISTORY ${storm.count}/${storm.required}`
+            );
+
+            updateProgress(
+                "waveProgress",
+                0
+            );
+
+            return storm;
+        }
+
+
+        // ----------------------------------------------------
         // SAVE RESULT
         // ----------------------------------------------------
 
-        currentVessel
-            .ndbc_storm_prediction =
-                storm;
+        if (currentVessel) {
 
+            currentVessel
+                .ndbc_storm_prediction =
+                    storm;
 
-        currentVessel
-            .ndbc_observations =
-                latestThree;
+        }
 
 
         // ----------------------------------------------------
-        // STEP 7
         // UPDATE DISPLAY
         // ----------------------------------------------------
 
-        updateStormDisplay(
-            currentVessel
-        );
+        if (currentVessel) {
+
+            updateStormDisplay(
+                currentVessel
+            );
+
+        } else {
+
+            // No vessel selected yet.
+            // Update the wave-risk UI directly.
+
+            setText(
+                "waveRisk",
+                String(
+                    storm.hazard ||
+                    "NORMAL"
+                )
+            );
 
 
-        console.log(
-            "================================================"
-        );
+            setText(
+                "waveProbability",
+                `${Number(
+                    storm.probability_percent ||
+                    0
+                ).toFixed(1)}%`
+            );
+
+
+            setText(
+                "xgbStatus",
+                "NDBC XGBOOST LIVE"
+            );
+
+
+            updateProgress(
+                "waveProgress",
+                Number(
+                    storm.probability_percent ||
+                    0
+                )
+            );
+
+        }
 
 
         return storm;
@@ -1787,7 +1648,7 @@ async function getNDBCStormPrediction() {
     } catch (error) {
 
         console.error(
-            "NDBC STORM PREDICTION ERROR:",
+            "NDBC XGBOOST ERROR:",
             error
         );
 
@@ -1825,48 +1686,82 @@ async function getNDBCStormPrediction() {
 // LSTM DISPLAY
 // ============================================================
 
-function updateLSTMDisplay(
-    vessel
-) {
+function updateLSTMDisplay(vessel) {
+
+    console.log("========== LSTM DISPLAY ==========");
+
+    // --------------------------------------------------------
+    // GET HTML ELEMENTS
+    // --------------------------------------------------------
 
     const statusElement =
-        document.getElementById(
-            "lstmStatus"
-        );
-
+        document.getElementById("lstmStatus");
 
     const predictionElement =
-        document.getElementById(
-            "lstmPrediction"
+        document.getElementById("lstmPrediction");
+
+    const waveStatusElement =
+        document.getElementById("lstmWaveStatus");
+
+
+    console.log("LSTM HTML ELEMENTS:", {
+        lstmStatus: statusElement,
+        lstmPrediction: predictionElement,
+        lstmWaveStatus: waveStatusElement
+    });
+
+
+    // --------------------------------------------------------
+    // CHECK REQUIRED ELEMENTS
+    // --------------------------------------------------------
+
+    if (!statusElement) {
+        console.error(
+            "ERROR: #lstmStatus NOT FOUND in monitoring.html"
         );
+    }
 
+    if (!predictionElement) {
+        console.error(
+            "ERROR: #lstmPrediction NOT FOUND in monitoring.html"
+        );
+    }
 
-    if (
-        !statusElement ||
-        !predictionElement
-    ) {
-
-        return;
+    if (!waveStatusElement) {
+        console.error(
+            "ERROR: #lstmWaveStatus NOT FOUND in monitoring.html"
+        );
     }
 
 
+    // --------------------------------------------------------
+    // NO VESSEL
+    // --------------------------------------------------------
+
     if (!vessel) {
+
+        setText(
+            "lstmStatus",
+            "WAITING FOR AIS"
+        );
 
         setText(
             "lstmPrediction",
             "-- m"
         );
 
-
         setText(
-            "lstmStatus",
-            "WAITING FOR LSTM"
+            "lstmWaveStatus",
+            "--"
         );
-
 
         return;
     }
 
+
+    // --------------------------------------------------------
+    // GET LSTM RESULT
+    // --------------------------------------------------------
 
     const lstm =
         vessel.lstm_prediction ??
@@ -1877,23 +1772,40 @@ function updateLSTMDisplay(
         null;
 
 
+    console.log(
+        "LSTM OBJECT FOR DISPLAY:",
+        lstm
+    );
+
+
+    // --------------------------------------------------------
+    // NO LSTM RESULT
+    // --------------------------------------------------------
+
     if (!lstm) {
-
-        setText(
-            "lstmPrediction",
-            "-- m"
-        );
-
 
         setText(
             "lstmStatus",
             "WAITING FOR LSTM"
         );
 
+        setText(
+            "lstmPrediction",
+            "-- m"
+        );
+
+        setText(
+            "lstmWaveStatus",
+            "--"
+        );
 
         return;
     }
 
+
+    // --------------------------------------------------------
+    // GET PREDICTED WAVE HEIGHT
+    // --------------------------------------------------------
 
     const predicted =
         Number(
@@ -1906,55 +1818,88 @@ function updateLSTMDisplay(
         );
 
 
-    if (
-        !Number.isFinite(
-            predicted
-        )
-    ) {
+    console.log(
+        "LSTM PREDICTED WAVE HEIGHT:",
+        predicted
+    );
+
+
+    // --------------------------------------------------------
+    // INVALID PREDICTION
+    // --------------------------------------------------------
+
+    if (!Number.isFinite(predicted)) {
+
+        setText(
+            "lstmStatus",
+            "LSTM ERROR"
+        );
 
         setText(
             "lstmPrediction",
             "-- m"
         );
 
-
         setText(
-            "lstmStatus",
-            "WAITING FOR LSTM"
+            "lstmWaveStatus",
+            "--"
         );
-
 
         return;
     }
 
 
-    let waveStatus =
-        String(
-            lstm.wave_status ??
-            lstm.status ??
-            ""
-        )
-            .toUpperCase()
-            .replace(
-                /\s+/g,
-                "_"
-            );
+    // --------------------------------------------------------
+    // GET BACKEND WAVE STATUS
+    // --------------------------------------------------------
 
+    let waveStatus =
+        lstm.wave_status ??
+        lstm.waveStatus ??
+        lstm.risk_level ??
+        lstm.prediction_status ??
+        lstm.status ??
+        "";
+
+
+    waveStatus =
+        String(waveStatus)
+            .trim()
+            .toUpperCase();
+
+
+    // --------------------------------------------------------
+    // IMPORTANT:
+    // Ignore generic API status "SUCCESS"
+    // because SUCCESS is not a wave-risk level.
+    // --------------------------------------------------------
+
+    if (
+        waveStatus === "SUCCESS" ||
+        waveStatus === "OK" ||
+        waveStatus === "READY"
+    ) {
+
+        waveStatus = "";
+    }
+
+
+    // --------------------------------------------------------
+    // CALCULATE WAVE STATUS FROM LSTM PREDICTION
+    //
+    // < 2.0 m  = LOW
+    // 2.0-2.99 = MODERATE
+    // >= 3.0   = HIGH WAVE
+    // --------------------------------------------------------
 
     if (!waveStatus) {
 
-        if (
-            predicted >=
-            3.0
-        ) {
+        if (predicted >= 3.0) {
 
             waveStatus =
                 "HIGH_WAVE";
 
-        } else if (
-            predicted >=
-            2.0
-        ) {
+        } else if (predicted >= 2.0) {
 
             waveStatus =
                 "MODERATE";
@@ -1967,20 +1912,48 @@ function updateLSTMDisplay(
     }
 
 
+    // --------------------------------------------------------
+    // FORMAT DISPLAY TEXT
+    // --------------------------------------------------------
+
+    const displayWaveStatus =
+        waveStatus
+            .replace(/_/g, " ");
+
+
+    // --------------------------------------------------------
+    // UPDATE PREDICTED VHM0
+    // --------------------------------------------------------
+
     setText(
         "lstmPrediction",
         `${predicted.toFixed(2)} m`
     );
 
 
+    // --------------------------------------------------------
+    // UPDATE MAIN LSTM STATUS
+    // --------------------------------------------------------
+
     setText(
         "lstmStatus",
-        waveStatus.replace(
-            /_/g,
-            " "
-        )
+        displayWaveStatus
     );
 
+
+    // --------------------------------------------------------
+    // UPDATE WAVE STATUS
+    // --------------------------------------------------------
+
+    setText(
+        "lstmWaveStatus",
+        displayWaveStatus
+    );
+
+
+    // --------------------------------------------------------
+    // APPLY CSS
+    // --------------------------------------------------------
 
     setRiskClass(
         "lstmStatus",
@@ -1988,84 +1961,99 @@ function updateLSTMDisplay(
     );
 
 
+    setRiskClass(
+        "lstmWaveStatus",
+        waveStatus
+    );
+
+
+    // --------------------------------------------------------
+    // FINAL DEBUG
+    // --------------------------------------------------------
+
     console.log(
         "LSTM DISPLAY UPDATED:",
         {
             prediction:
                 predicted,
 
-            status:
-                waveStatus
+            wave_status:
+                waveStatus,
+
+            display_status:
+                displayWaveStatus,
+
+            elements_found: {
+                lstmStatus:
+                    !!statusElement,
+
+                lstmPrediction:
+                    !!predictionElement,
+
+                lstmWaveStatus:
+                    !!waveStatusElement
+            }
         }
+    );
+
+    console.log(
+        "================================="
     );
 }
 
 
 // ============================================================
 // LSTM PREDICTION
-//
-// IMPORTANT:
-// This does NOT convert AIS speed/course into wave values.
-//
-// The backend must provide the actual LSTM result.
 // ============================================================
 
 async function getLSTMPrediction() {
 
-    if (
-        lstmRequestInProgress
-    ) {
-
+    if (lstmRequestInProgress) {
         return null;
     }
-
 
     const vessel =
         currentVessel ||
         allVessels[0];
 
-
     if (!vessel) {
 
-        updateLSTMDisplay(
-            null
-        );
+        updateLSTMDisplay(null);
 
         return null;
     }
-
 
     if (!vessel.mmsi) {
 
-        updateLSTMDisplay(
-            null
-        );
+        updateLSTMDisplay(null);
 
         return null;
     }
 
-
-    lstmRequestInProgress =
-        true;
-
+    lstmRequestInProgress = true;
 
     try {
+
+        console.log(
+            "=============================================="
+        );
 
         console.log(
             "CALLING LIVE LSTM:",
             vessel.mmsi
         );
 
+        // ----------------------------------------------------
+        // CALL BACKEND LSTM
+        // ----------------------------------------------------
 
         const response =
             await fetch(
                 `${API_BASE}/predict/lstm/live?t=${Date.now()}`,
                 {
-                    method:
-                        "GET",
+                    method: "GET",
 
-                    cache:
-                        "no-store",
+                    cache: "no-store",
 
                     headers: {
                         "Accept":
@@ -2074,40 +2062,143 @@ async function getLSTMPrediction() {
                 }
             );
 
+        // ----------------------------------------------------
+        // HTTP ERROR
+        // ----------------------------------------------------
 
-        if (
-            !response.ok
-        ) {
+        if (!response.ok) {
 
             throw new Error(
-                `LSTM returned ` +
-                `${response.status}`
+                `LSTM returned ${response.status}`
             );
         }
 
+        // ----------------------------------------------------
+        // READ RESPONSE
+        // ----------------------------------------------------
 
         const result =
             await response.json();
-
 
         console.log(
             "LSTM RESULT:",
             result
         );
 
+        // ----------------------------------------------------
+        // SAVE RESULT
+        // ----------------------------------------------------
 
-        currentVessel
-            .lstm_prediction =
-                result;
+        currentVessel.lstm_prediction =
+            result;
 
+// ============================================================
+// SAVE WAVE STATUS FOR FRONTEND
+// ============================================================
+
+if (
+    result.predicted_vhm0_m !== undefined ||
+    result.prediction !== undefined
+) {
+
+    const predicted = Number(
+        result.predicted_vhm0_m ?? result.prediction
+    );
+
+    if (Number.isFinite(predicted)) {
+
+        let waveStatus;
+
+        // Wave-height classification
+        if (predicted >= 3.0) {
+            waveStatus = "HIGH";
+        }
+        else if (predicted >= 2.0) {
+            waveStatus = "MODERATE";
+        }
+        else {
+            waveStatus = "LOW";
+        }
+
+        // Save it inside LSTM result
+        result.wave_status = waveStatus;
+
+        // Also save separately for frontend
+        currentVessel.lstm_wave_status = waveStatus;
+
+        console.log(
+            "LSTM WAVE STATUS:",
+            waveStatus,
+            "Predicted VHM0:",
+            predicted
+        );
+    }
+}
+
+// Save complete LSTM result
+currentVessel.lstm_prediction = result;
+
+console.log(
+    "LSTM RESULT SAVED:",
+    currentVessel.lstm_prediction
+);
+
+        // ----------------------------------------------------
+        // IMPORTANT:
+        // HANDLE COLLECTING STATUS
+        // ----------------------------------------------------
+
+        if (
+            String(
+                result.status ?? ""
+            ).toLowerCase() === "collecting"
+        ) {
+
+            const available =
+                Number(
+                    result.observations_available ?? 0
+                );
+
+            const required =
+                Number(
+                    result.observations_required ?? 8
+                );
+
+            console.log(
+                `LSTM COLLECTING WAVE DATA: ${available}/${required}`
+            );
+
+            setText(
+                "lstmPrediction",
+                "-- m"
+            );
+
+            setText(
+                "lstmStatus",
+                `COLLECTING WAVE DATA (${available}/${required})`
+            );
+
+            setRiskClass(
+                "lstmStatus",
+                "moderate"
+            );
+
+            return result;
+        }
+
+        // ----------------------------------------------------
+        // NORMAL LSTM RESULT
+        // ----------------------------------------------------
 
         updateLSTMDisplay(
             currentVessel
         );
 
+        console.log(
+            "=============================================="
+        );
 
         return result;
-
 
     } catch (error) {
 
@@ -2116,21 +2207,17 @@ async function getLSTMPrediction() {
             error
         );
 
-
         setText(
             "lstmStatus",
             "LSTM WAITING"
         );
-
 
         setText(
             "lstmPrediction",
             "-- m"
         );
 
-
         return null;
-
 
     } finally {
 

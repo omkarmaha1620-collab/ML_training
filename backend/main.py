@@ -7,6 +7,7 @@ from pathlib import Path
 import os
 import json
 import math
+import httpx
 import asyncio
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
@@ -53,6 +54,33 @@ SHIPFINDER_API_KEY = os.getenv(
     "SHIPFINDER_API_KEY"
 )
 
+# ============================================================
+# VESSELAPI
+# ============================================================
+
+VESSELAPI_API_KEY = os.getenv(
+    "VESSELAPI_API_KEY"
+)
+
+VESSELAPI_BASE_URL = (
+    "https://api.vesselapi.com"
+)
+
+VESSELAPI_POLL_SECONDS = float(
+    os.getenv(
+        "VESSELAPI_POLL_SECONDS",
+        "60"
+    )
+)
+
+VESSELAPI_VESSELS = {}
+
+VESSELAPI_CONNECTED = False
+
+VESSELAPI_LAST_UPDATE = None
+
+VESSELAPI_LAST_ERROR = None
+
 WEATHER_API_KEY = os.getenv(
     "WEATHER_API_KEY"
 )
@@ -83,13 +111,13 @@ XGB_HIGH_WAVE_PATH = (
 LSTM_MODEL_PATH = (
     BASE_DIR /
     "LSTM" /
-    "lstm_model.keras"
+    "lstm_model_30min.keras"
 )
 
 LSTM_SCALER_PATH = (
     BASE_DIR /
     "LSTM" /
-    "lstm_scaler.pkl"
+    "lstm_scaler_30min.pkl"
 )
 
 PPO_PATH = (
@@ -1758,7 +1786,371 @@ def predict_live_vessel_xgboost_risk(
             risk_level
     }
 
+# ============================================================
+# VESSELAPI LIVE VESSEL WORKER
+# PRIMARY VESSEL SOURCE
+# ============================================================
 
+async def vesselapi_worker():
+
+    global VESSELAPI_CONNECTED
+    global VESSELAPI_LAST_UPDATE
+    global VESSELAPI_LAST_ERROR
+
+    if not VESSELAPI_API_KEY:
+
+        print(
+            "VesselAPI API key not configured."
+        )
+
+        VESSELAPI_CONNECTED = False
+
+        return
+
+
+    print(
+        "Starting VesselAPI live vessel worker..."
+    )
+
+
+    # --------------------------------------------------------
+    # DEMO / MONITORING REGION
+    #
+    # English Channel / southern UK area
+    # Small bounding box because VesselAPI limits
+    # bounding-box size.
+    # --------------------------------------------------------
+
+    lat_bottom = 50.0
+    lat_top = 51.0
+
+    lon_left = -3.0
+    lon_right = -2.0
+
+
+    url = (
+        f"{VESSELAPI_BASE_URL}"
+        "/v1/location/vessels/bounding-box"
+    )
+
+
+    while True:
+
+        try:
+
+            headers = {
+
+                "Authorization":
+                    f"Bearer {VESSELAPI_API_KEY}",
+
+                "Accept":
+                    "application/json"
+
+            }
+
+
+            params = {
+
+                "filter.latBottom":
+                    lat_bottom,
+
+                "filter.latTop":
+                    lat_top,
+
+                "filter.lonLeft":
+                    lon_left,
+
+                "filter.lonRight":
+                    lon_right,
+
+                "pagination.limit":
+                    50
+
+            }
+
+
+            async with httpx.AsyncClient(
+                timeout=20.0
+            ) as client:
+
+                response = await client.get(
+                    url,
+                    headers=headers,
+                    params=params
+                )
+
+
+            if response.status_code != 200:
+
+                raise RuntimeError(
+                    "VesselAPI HTTP "
+                    f"{response.status_code}: "
+                    f"{response.text[:500]}"
+                )
+
+
+            data = (
+                response.json()
+            )
+
+
+            raw_vessels = (
+                data.get(
+                    "vessels",
+                    []
+                )
+            )
+
+
+            if not isinstance(
+                raw_vessels,
+                list
+            ):
+
+                raw_vessels = []
+
+
+            new_vessels = {}
+
+
+            for raw in raw_vessels:
+
+                if not isinstance(
+                    raw,
+                    dict
+                ):
+
+                    continue
+
+
+                try:
+
+                    mmsi = (
+                        raw.get(
+                            "mmsi"
+                        )
+                    )
+
+
+                    if mmsi is None:
+
+                        continue
+
+
+                    mmsi = int(
+                        mmsi
+                    )
+
+
+                    latitude = float(
+                        raw.get(
+                            "latitude"
+                        )
+                    )
+
+
+                    longitude = float(
+                        raw.get(
+                            "longitude"
+                        )
+                    )
+
+
+                    speed = float(
+                        raw.get(
+                            "sog",
+                            raw.get(
+                                "speed",
+                                0
+                            )
+                        )
+                        or 0
+                    )
+
+
+                    course = float(
+                        raw.get(
+                            "cog",
+                            raw.get(
+                                "course",
+                                0
+                            )
+                        )
+                        or 0
+                    )
+
+
+                    heading_value = (
+                        raw.get(
+                            "heading"
+                        )
+                    )
+
+
+                    if heading_value is None:
+
+                        heading_value = (
+                            course
+                        )
+
+
+                    heading = float(
+                        heading_value
+                    )
+
+
+                    vessel = {
+
+                        "mmsi":
+                            mmsi,
+
+                        "ship_name":
+                            str(
+                                raw.get(
+                                    "vessel_name",
+                                    raw.get(
+                                        "ship_name",
+                                        "UNKNOWN VESSEL"
+                                    )
+                                )
+                            ),
+
+                        "latitude":
+                            latitude,
+
+                        "longitude":
+                            longitude,
+
+                        "speed":
+                            speed,
+
+                        "course":
+                            course,
+
+                        "heading":
+                            heading,
+
+                        "sog":
+                            speed,
+
+                        "cog":
+                            course,
+
+                        "hdg":
+                            heading,
+
+                        "imo":
+                            raw.get(
+                                "imo"
+                            ),
+
+                        "ship_type":
+                            raw.get(
+                                "ship_type",
+                                raw.get(
+                                    "vessel_type"
+                                )
+                            ),
+
+                        "timestamp":
+                            raw.get(
+                                "timestamp"
+                            ),
+
+                        "source":
+                            "VesselAPI",
+
+                        "live":
+                            True
+
+                    }
+
+
+                    new_vessels[
+                        mmsi
+                    ] = vessel
+
+
+                except (
+                    TypeError,
+                    ValueError
+                ):
+
+                    continue
+
+
+            # ------------------------------------------------
+            # SAVE VESSEL DATA
+            # ------------------------------------------------
+
+            if new_vessels:
+
+                AIS_VESSELS.update(
+                    new_vessels
+                )
+
+
+                VESSELAPI_VESSELS.clear()
+
+                VESSELAPI_VESSELS.update(
+                    new_vessels
+                )
+
+
+                VESSELAPI_CONNECTED = True
+
+                VESSELAPI_LAST_UPDATE = (
+                    datetime.now(
+                        timezone.utc
+                    ).isoformat()
+                )
+
+                VESSELAPI_LAST_ERROR = None
+
+
+                print(
+                    "VESSELAPI LIVE VESSELS:",
+                    len(
+                        new_vessels
+                    )
+                )
+
+
+            else:
+
+                VESSELAPI_CONNECTED = True
+
+                VESSELAPI_LAST_UPDATE = (
+                    datetime.now(
+                        timezone.utc
+                    ).isoformat()
+                )
+
+
+                print(
+                    "VESSELAPI CONNECTED "
+                    "BUT NO VESSELS FOUND"
+                )
+
+
+        except Exception as e:
+
+            VESSELAPI_CONNECTED = False
+
+            VESSELAPI_LAST_ERROR = (
+                str(e)
+            )
+
+
+            print(
+                "VESSELAPI ERROR:",
+                e
+            )
+
+
+        await asyncio.sleep(
+            VESSELAPI_POLL_SECONDS
+        )
 # ============================================================
 # AIS STREAM WORKER
 # ============================================================
@@ -1961,10 +2353,966 @@ class AISRouteRequest(
         None
     ) = None
 
+# ============================================================
+# NDBC LIVE WAVE DATA
+# ============================================================
+
+NDBC_STATIONS = [
+    "41004",
+    "41008",
+    "41010",
+    "41013",
+    "41043",
+    "42001",
+    "42002",
+    "42035",
+    "42057",
+    "44008",
+    "44011",
+    "44014",
+    "46001",
+    "46011",
+    "46015",
+    "46022",
+    "46025",
+    "46026",
+    "46028",
+    "46041",
+    "46042",
+]
+
+NDBC_LAST_TIMESTAMP = None
+
+
+# ============================================================
+# FETCH COMPLETE NDBC OBSERVATION
+# ============================================================
+
+def fetch_ndbc_wave_observation():
+
+    global NDBC_LAST_TIMESTAMP
+
+    try:
+
+        import requests
+
+        for station in NDBC_STATIONS:
+
+            url = (
+                "https://www.ndbc.noaa.gov/data/"
+                "realtime2/"
+                f"{station}.txt"
+            )
+
+            try:
+
+                response = requests.get(
+                    url,
+                    timeout=10
+                )
+
+                response.raise_for_status()
+
+            except Exception:
+
+                continue
+
+
+            lines = response.text.splitlines()
+
+
+            data_lines = [
+                line
+                for line in lines
+                if line.strip()
+                and not line.startswith("#")
+            ]
+
+
+            if not data_lines:
+
+                continue
+
+
+            # Latest observation
+            parts = data_lines[0].split()
+
+
+            if len(parts) < 19:
+
+                continue
+
+
+            # ------------------------------------------------
+            # NDBC realtime2 columns
+            # ------------------------------------------------
+            #
+            # 0  year
+            # 1  month
+            # 2  day
+            # 3  hour
+            # 4  minute
+            # 5  WDIR
+            # 6  WSPD
+            # 7  GST
+            # 8  WVHT
+            # 9  DPD
+            # 10 APD
+            # 11 MWD
+            # 12 PRES
+            # 13 ATMP
+            # 14 WTMP
+            #
+            # Some stations have additional fields.
+            #
+            # We therefore use the actual standard positions
+            # above rather than assuming the last columns.
+            # ------------------------------------------------
+
+
+            required = {
+
+                "WSPD": parts[6],
+
+                "GST": parts[7],
+
+                "WVHT": parts[8],
+
+                "DPD": parts[9],
+
+                "APD": parts[10],
+
+                "MWD": parts[11],
+
+                "PRES": parts[12],
+
+                "ATMP": parts[13],
+
+                "WTMP": parts[14]
+            }
+
+
+            # ------------------------------------------------
+            # Reject missing values
+            # ------------------------------------------------
+
+            if any(
+                value == "MM"
+                for value in required.values()
+            ):
+
+                continue
+
+
+            try:
+
+                timestamp = (
+                    f"{parts[0]}-"
+                    f"{parts[1].zfill(2)}-"
+                    f"{parts[2].zfill(2)}T"
+                    f"{parts[3].zfill(2)}:"
+                    f"{parts[4].zfill(2)}:00+00:00"
+                )
+
+
+                # ------------------------------------------------
+                # LSTM variables
+                # ------------------------------------------------
+
+                vhm0 = float(
+                    parts[8]
+                )
+
+                vtpk = float(
+                    parts[9]
+                )
+
+                vped = float(
+                    parts[11]
+                )
+
+
+                # ------------------------------------------------
+                # XGBoost variables
+                # ------------------------------------------------
+
+                observation = {
+
+                    # LSTM
+                    "VHM0":
+                        vhm0,
+
+                    "VTPK":
+                        vtpk,
+
+                    "VPED":
+                        vped,
+
+
+                    # XGBoost
+                    "WVHT":
+                        float(parts[8]),
+
+                    "WSPD":
+                        float(parts[6]),
+
+                    "GST":
+                        float(parts[7]),
+
+                    "DPD":
+                        float(parts[9]),
+
+                    "APD":
+                        float(parts[10]),
+
+                    "PRES":
+                        float(parts[12]),
+
+                    "ATMP":
+                        float(parts[13]),
+
+                    "WTMP":
+                        float(parts[14]),
+
+
+                    # Metadata
+                    "timestamp":
+                        timestamp,
+
+                    "station":
+                        station
+                }
+
+
+            except (
+                ValueError,
+                IndexError
+            ):
+
+                continue
+
+
+            # ------------------------------------------------
+            # Prevent duplicate observation
+            # ------------------------------------------------
+
+            if (
+                timestamp ==
+                NDBC_LAST_TIMESTAMP
+            ):
+
+                return None
+
+
+            NDBC_LAST_TIMESTAMP = timestamp
+
+
+            print(
+                "NDBC COMPLETE OBSERVATION:",
+                station,
+                observation
+            )
+
+
+            return observation
+
+
+        print(
+            "NDBC: No complete station found."
+        )
+
+
+        return None
+
+
+    except Exception as e:
+
+        print(
+            "NDBC fetch error:",
+            e
+        )
+
+
+        return None
+
+# ============================================================
+# NDBC XGBOOST HIGH-WAVE PREDICTION
+# ============================================================
+
+def run_ndbc_xgb_prediction(
+    history
+):
+
+    global xgb_high_wave_model
+
+    if xgb_high_wave_model is None:
+
+        raise RuntimeError(
+            "High-wave XGBoost model is not loaded."
+        )
+
+
+    if len(history) != 3:
+
+        raise ValueError(
+            "NDBC XGBoost requires exactly 3 observations."
+        )
+
+
+    feature_columns = []
+
+
+    # --------------------------------------------------------
+    # Match the exact training feature order
+    # --------------------------------------------------------
+
+    base_features = [
+
+        "WVHT",
+        "WSPD",
+        "GST",
+        "DPD",
+        "APD",
+        "PRES",
+        "ATMP",
+        "WTMP"
+    ]
+
+
+    for lag in [1, 2, 3]:
+
+        for feature in base_features:
+
+            feature_columns.append(
+                f"{feature}_t-{lag}"
+            )
+
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    #
+    # history is chronological:
+    #
+    # oldest → newest
+    #
+    # XGBoost training expects:
+    #
+    # t-1 = newest previous
+    # t-2 = previous
+    # t-3 = oldest
+    # --------------------------------------------------------
+
+    newest_to_oldest = list(
+        reversed(history)
+    )
+
+
+    values = []
+
+
+    for observation in newest_to_oldest:
+
+        for feature in base_features:
+
+            values.append(
+                float(
+                    observation[feature]
+                )
+            )
+
+
+    X = np.array(
+        [values],
+        dtype=np.float32
+    )
+
+
+    probability = float(
+        xgb_high_wave_model.predict_proba(
+            X
+        )[0][1]
+    )
+
+
+    # --------------------------------------------------------
+    # Classification
+    # --------------------------------------------------------
+
+    if probability >= 0.50:
+
+        hazard = "HIGH_WAVE"
+
+    else:
+
+        hazard = "NORMAL"
+
+
+    result = {
+
+        "status":
+            "success",
+
+        "model":
+            "XGBoost NDBC High-Wave",
+
+        "probability":
+            probability,
+
+        "probability_percent":
+            round(
+                probability * 100,
+                2
+            ),
+
+        "hazard":
+            hazard,
+
+        "observations_used":
+            3,
+
+        "features_used":
+            24,
+
+        "station":
+            history[-1].get(
+                "station"
+            ),
+
+        "latest_timestamp":
+            history[-1].get(
+                "timestamp"
+            ),
+
+        "history":
+            history
+    }
+
+
+    return result  
+
+# ============================================================
+# FETCH RECENT NDBC OBSERVATIONS FOR STARTUP
+# ============================================================
+
+def fetch_ndbc_recent_observations(
+    required_count=8
+):
+
+    try:
+
+        import requests
+
+        for station in NDBC_STATIONS:
+
+            url = (
+                "https://www.ndbc.noaa.gov/data/"
+                "realtime2/"
+                f"{station}.txt"
+            )
+
+            try:
+
+                response = requests.get(
+                    url,
+                    timeout=15
+                )
+
+                response.raise_for_status()
+
+            except Exception:
+
+                continue
+
+
+            lines = response.text.splitlines()
+
+            data_lines = [
+                line
+                for line in lines
+                if line.strip()
+                and not line.startswith("#")
+            ]
+
+
+            if not data_lines:
+
+                continue
+
+
+            observations = []
+
+
+            # ------------------------------------------------
+            # Read recent rows
+            # ------------------------------------------------
+
+            for line in data_lines:
+
+                parts = line.split()
+
+
+                if len(parts) < 15:
+
+                    continue
+
+
+                # Required XGBoost fields
+                required = [
+
+                    parts[6],   # WSPD
+                    parts[7],   # GST
+                    parts[8],   # WVHT
+                    parts[9],   # DPD
+                    parts[10],  # APD
+                    parts[11],  # MWD
+                    parts[12],  # PRES
+                    parts[13],  # ATMP
+                    parts[14]   # WTMP
+                ]
+
+
+                # Skip incomplete rows
+
+                if any(
+                    value == "MM"
+                    for value in required
+                ):
+
+                    continue
+
+
+                try:
+
+                    timestamp = (
+                        f"{parts[0]}-"
+                        f"{parts[1].zfill(2)}-"
+                        f"{parts[2].zfill(2)}T"
+                        f"{parts[3].zfill(2)}:"
+                        f"{parts[4].zfill(2)}:00+00:00"
+                    )
+
+
+                    observation = {
+
+                        # ------------------------------
+                        # LSTM
+                        # ------------------------------
+
+                        "VHM0":
+                            float(parts[8]),
+
+                        "VTPK":
+                            float(parts[9]),
+
+                        "VPED":
+                            float(parts[11]),
+
+
+                        # ------------------------------
+                        # XGBoost
+                        # ------------------------------
+
+                        "WVHT":
+                            float(parts[8]),
+
+                        "WSPD":
+                            float(parts[6]),
+
+                        "GST":
+                            float(parts[7]),
+
+                        "DPD":
+                            float(parts[9]),
+
+                        "APD":
+                            float(parts[10]),
+
+                        "PRES":
+                            float(parts[12]),
+
+                        "ATMP":
+                            float(parts[13]),
+
+                        "WTMP":
+                            float(parts[14]),
+
+
+                        # ------------------------------
+                        # Metadata
+                        # ------------------------------
+
+                        "timestamp":
+                            timestamp,
+
+                        "station":
+                            station
+                    }
+
+
+                except (
+                    ValueError,
+                    IndexError
+                ):
+
+                    continue
+
+
+                observations.append(
+                    observation
+                )
+
+
+                # We only need recent rows
+
+                if len(observations) >= (
+                    required_count
+                ):
+
+                    break
+
+
+            # ------------------------------------------------
+            # Need enough observations
+            # ------------------------------------------------
+
+            if len(observations) < required_count:
+
+                continue
+
+
+            # NDBC gives newest → oldest.
+            #
+            # Reverse so history becomes:
+            #
+            # oldest → newest
+
+            observations.reverse()
+
+
+            print()
+            print(
+                "NDBC STARTUP HISTORY LOADED:"
+            )
+
+            print(
+                "Station:",
+                station
+            )
+
+            print(
+                "Observations:",
+                len(observations)
+            )
+
+            print(
+                "Oldest:",
+                observations[0]["timestamp"]
+            )
+
+            print(
+                "Newest:",
+                observations[-1]["timestamp"]
+            )
+
+
+            return observations
+
+
+        print(
+            "NDBC startup: "
+            "no station with enough complete observations."
+        )
+
+        return []
+
+
+    except Exception as e:
+
+        print(
+            "NDBC startup fetch error:",
+            e
+        )
+
+        return [] 
+
+
+
+
+# ============================================================
+# NDBC BACKGROUND WORKER
+# ============================================================
+
+async def ndbc_wave_loop():
+
+    global LSTM_WAVE_HISTORY
+    global NDBC_XGB_HISTORY
+    global NDBC_LAST_XGB_RESULT
+    global NDBC_LAST_TIMESTAMP
+
+
+    print(
+        "NDBC wave service started."
+    )
+
+
+    # ========================================================
+    # STARTUP BOOTSTRAP
+    # ========================================================
+
+    try:
+
+        startup_history = (
+            fetch_ndbc_recent_observations(
+                required_count=8
+            )
+        )
+
+
+        if startup_history:
+
+            # ------------------------------------------------
+            # LSTM
+            # ------------------------------------------------
+
+            LSTM_WAVE_HISTORY.clear()
+
+
+            for observation in startup_history:
+
+                add_wave_observation(
+
+                    observation["VHM0"],
+
+                    observation["VTPK"],
+
+                    observation["VPED"],
+
+                    observation["timestamp"]
+
+                )
+
+
+            print(
+                "LSTM startup history:",
+                len(LSTM_WAVE_HISTORY),
+                "/ 8"
+            )
+
+
+            # ------------------------------------------------
+            # XGBOOST
+            # ------------------------------------------------
+
+            NDBC_XGB_HISTORY.clear()
+
+
+            NDBC_XGB_HISTORY.extend(
+                startup_history[-3:]
+            )
+
+
+            print(
+                "XGBoost startup history:",
+                len(NDBC_XGB_HISTORY),
+                "/ 3"
+            )
+
+
+            # ------------------------------------------------
+            # Set latest timestamp
+            # ------------------------------------------------
+
+            NDBC_LAST_TIMESTAMP = (
+                startup_history[-1]["timestamp"]
+            )
+
+
+            # ------------------------------------------------
+            # Immediate XGBoost prediction
+            # ------------------------------------------------
+
+            if len(
+                NDBC_XGB_HISTORY
+            ) == 3:
+
+                try:
+
+                    NDBC_LAST_XGB_RESULT = (
+
+                        run_ndbc_xgb_prediction(
+                            NDBC_XGB_HISTORY
+                        )
+
+                    )
+
+
+                    print(
+                        "STARTUP XGBoost prediction:"
+                    )
+
+                    print(
+                        NDBC_LAST_XGB_RESULT
+                    )
+
+
+                except Exception as e:
+
+                    print(
+                        "Startup XGBoost error:",
+                        e
+                    )
+
+
+        else:
+
+            print(
+                "NDBC startup bootstrap "
+                "could not load history."
+            )
+
+
+    except Exception as e:
+
+        print(
+            "NDBC startup bootstrap error:",
+            e
+        )
+
+
+    # ========================================================
+    # CONTINUOUS UPDATE LOOP
+    # ========================================================
+
+    while True:
+
+        try:
+
+            observation = (
+                fetch_ndbc_wave_observation()
+            )
+
+
+            if observation is not None:
+
+
+                # ====================================================
+                # LSTM
+                # ====================================================
+
+                add_wave_observation(
+
+                    observation["VHM0"],
+
+                    observation["VTPK"],
+
+                    observation["VPED"],
+
+                    observation["timestamp"]
+
+                )
+
+
+                print(
+                    "NDBC LSTM observation added:",
+                    observation["station"]
+                )
+
+
+                print(
+                    "LSTM history:",
+                    len(
+                        LSTM_WAVE_HISTORY
+                    ),
+                    "/ 8"
+                )
+
+
+                # ====================================================
+                # XGBOOST
+                # ====================================================
+
+                NDBC_XGB_HISTORY.append(
+                    observation
+                )
+
+
+                if len(
+                    NDBC_XGB_HISTORY
+                ) > 3:
+
+                    del NDBC_XGB_HISTORY[
+                        :-3
+                    ]
+
+
+                print(
+                    "NDBC XGBoost history:",
+                    len(
+                        NDBC_XGB_HISTORY
+                    ),
+                    "/ 3"
+                )
+
+
+                # ====================================================
+                # XGBOOST PREDICTION
+                # ====================================================
+
+                if len(
+                    NDBC_XGB_HISTORY
+                ) == 3:
+
+                    try:
+
+                        NDBC_LAST_XGB_RESULT = (
+
+                            run_ndbc_xgb_prediction(
+                                NDBC_XGB_HISTORY
+                            )
+
+                        )
+
+
+                        print(
+                            "NDBC XGBoost prediction:",
+                            NDBC_LAST_XGB_RESULT
+                        )
+
+
+                    except Exception as e:
+
+                        print(
+                            "NDBC XGBoost prediction error:",
+                            e
+                        )
+
+
+        except Exception as e:
+
+            print(
+                "NDBC loop error:",
+                e
+            )
+
+
+        # Check for fresh NDBC data every 5 minutes
+
+        await asyncio.sleep(
+            300
+        )
 
 # ============================================================
 # FASTAPI LIFESPAN
 # ============================================================
+
+AIS_TASK = None
+VESSELAPI_TASK = None
+NDBC_TASK = None
+NDBC_LAST_TIMESTAMP = None
+
+NDBC_XGB_HISTORY = []
+NDBC_XGB_HISTORY_MAX = 3
+NDBC_LAST_XGB_RESULT = None
 
 @asynccontextmanager
 async def lifespan(
@@ -1972,6 +3320,8 @@ async def lifespan(
 ):
 
     global AIS_TASK
+    global VESSELAPI_TASK
+    global NDBC_TASK
 
     print()
     print("=" * 70)
@@ -1980,15 +3330,43 @@ async def lifespan(
     )
     print("=" * 70)
 
+
+    # ------------------------------------------------------------
+    # START VESSELAPI FIRST
+    # ------------------------------------------------------------
+
+    VESSELAPI_TASK = asyncio.create_task(
+        vesselapi_worker()
+    )
+
+
+    # ------------------------------------------------------------
+    # START AISSTREAM BACKUP
+    # ------------------------------------------------------------
+
     AIS_TASK = asyncio.create_task(
         ais_stream_worker()
     )
+
+
+    # ------------------------------------------------------------
+    # START NDBC WAVE DATA WORKER
+    # ------------------------------------------------------------
+
+    NDBC_TASK = asyncio.create_task(
+        ndbc_wave_loop()
+    )
+
 
     try:
 
         yield
 
     finally:
+
+        # --------------------------------------------------------
+        # STOP AIS
+        # --------------------------------------------------------
 
         if AIS_TASK is not None:
 
@@ -2001,6 +3379,41 @@ async def lifespan(
             except asyncio.CancelledError:
 
                 pass
+
+
+        # --------------------------------------------------------
+        # STOP VESSELAPI
+        # --------------------------------------------------------
+
+        if VESSELAPI_TASK is not None:
+
+            VESSELAPI_TASK.cancel()
+
+            try:
+
+                await VESSELAPI_TASK
+
+            except asyncio.CancelledError:
+
+                pass
+
+
+        # --------------------------------------------------------
+        # STOP NDBC WAVE TASK
+        # --------------------------------------------------------
+
+        if NDBC_TASK is not None:
+
+            NDBC_TASK.cancel()
+
+            try:
+
+                await NDBC_TASK
+
+            except asyncio.CancelledError:
+
+                pass
+
 
         print(
             "Backend shutdown complete."
@@ -2025,6 +3438,38 @@ app = FastAPI(
 
     lifespan=lifespan
 )
+
+
+# ============================================================
+# NDBC XGBOOST RESULT
+# ============================================================
+
+@app.get(
+    "/wave/ndbc/xgboost"
+)
+def get_ndbc_xgboost_result():
+
+    if NDBC_LAST_XGB_RESULT is None:
+
+        return {
+
+            "status":
+                "waiting",
+
+            "required":
+                3,
+
+            "count":
+                len(
+                    NDBC_XGB_HISTORY
+                ),
+
+            "result":
+                None
+        }
+
+
+    return NDBC_LAST_XGB_RESULT
 
 
 # ============================================================
@@ -2250,17 +3695,19 @@ def build_vessel_record(
 
 
 # ============================================================
-# ALL AIS VESSELS
+# GET AIS VESSELS
 # ============================================================
 
-@app.get("/ais/vessels")
+@app.get(
+    "/ais/vessels"
+)
 async def get_ais_vessels():
 
-    # --------------------------------------------------------
-    # LIVE AIS
-    # --------------------------------------------------------
+    # ========================================================
+    # 1. VESSELAPI — PRIMARY SOURCE
+    # ========================================================
 
-    if AIS_VESSELS:
+    if VESSELAPI_VESSELS:
 
         vessels = [
 
@@ -2269,7 +3716,8 @@ async def get_ais_vessels():
             )
 
             for vessel
-            in AIS_VESSELS.values()
+            in VESSELAPI_VESSELS.values()
+
         ]
 
         return {
@@ -2284,11 +3732,110 @@ async def get_ais_vessels():
                 vessels,
 
             "source":
-                "live",
+                "VesselAPI",
 
             "message":
-                "All currently received AIS vessels."
+                "Live vessels received from VesselAPI."
+
         }
+
+
+    # ========================================================
+    # 2. AISSTREAM — SECONDARY SOURCE
+    # ========================================================
+
+    if AIS_VESSELS:
+
+        vessels = [
+
+            build_vessel_record(
+                vessel
+            )
+
+            for vessel
+            in AIS_VESSELS.values()
+
+        ]
+
+        return {
+
+            "status":
+                "success",
+
+            "count":
+                len(vessels),
+
+            "vessels":
+                vessels,
+
+            "source":
+                "AISStream",
+
+            "message":
+                "Live vessels received from AISStream."
+
+        }
+
+
+    # ========================================================
+    # 3. DEMO — LAST FALLBACK
+    # ========================================================
+
+    vessels = get_fallback_copy()
+
+
+    for vessel in vessels:
+
+        try:
+
+            vessel["vessel_risk"] = (
+
+                predict_live_vessel_risk(
+
+                    vessel["mmsi"],
+
+                    vessel["latitude"],
+
+                    vessel["longitude"],
+
+                    vessel.get(
+                        "speed",
+                        0.0
+                    )
+
+                )
+
+            )
+
+        except Exception:
+
+            vessel["vessel_risk"] = {
+
+                "risk_level":
+                    "PENDING"
+
+            }
+
+
+    return {
+
+        "status":
+            "success",
+
+        "count":
+            len(vessels),
+
+        "vessels":
+            vessels,
+
+        "source":
+            "DEMO",
+
+        "message":
+            "VesselAPI and AISStream unavailable. "
+            "Demo vessels are being used."
+
+    }
 
 
     # --------------------------------------------------------
@@ -2344,29 +3891,129 @@ async def get_ais_vessels():
 # FIND VESSEL
 # ============================================================
 
-def find_vessel_by_mmsi(
-    mmsi
-):
+def find_vessel_by_mmsi(mmsi):
 
-    target = int(
-        mmsi
+    target = str(int(mmsi))
+
+    # ========================================================
+    # VESSELAPI FIRST
+    # ========================================================
+
+    try:
+
+        # Direct lookup
+        vessel = VESSELAPI_VESSELS.get(target)
+
+        if vessel is not None:
+            return vessel
+
+        # Try integer key
+        vessel = VESSELAPI_VESSELS.get(int(target))
+
+        if vessel is not None:
+            return vessel
+
+        # Search through all VesselAPI vessels
+        for item in VESSELAPI_VESSELS.values():
+
+            try:
+
+                if str(item.get("mmsi")) == target:
+                    return item
+
+            except Exception:
+                continue
+
+    except Exception as e:
+
+        print(
+            "VesselAPI vessel search error:",
+            e
+        )
+
+    # ========================================================
+    # AISSTREAM SECOND
+    # ========================================================
+
+    try:
+
+        # Direct lookup
+        vessel = AIS_VESSELS.get(target)
+
+        if vessel is not None:
+            return vessel
+
+        # Try integer key
+        vessel = AIS_VESSELS.get(int(target))
+
+        if vessel is not None:
+            return vessel
+
+        # Search through all AISStream vessels
+        for item in AIS_VESSELS.values():
+
+            try:
+
+                if str(item.get("mmsi")) == target:
+                    return item
+
+            except Exception:
+                continue
+
+    except Exception as e:
+
+        print(
+            "AISStream vessel search error:",
+            e
+        )
+
+    # ========================================================
+    # DEMO FALLBACK
+    # ========================================================
+
+    try:
+
+        fallback = load_fallback_vessels()
+
+        # Direct lookup
+        vessel = fallback.get(target)
+
+        if vessel is not None:
+            return vessel
+
+        # Search fallback records
+        for item in fallback.values():
+
+            try:
+
+                if str(item.get("mmsi")) == target:
+                    return item
+
+            except Exception:
+                continue
+
+    except Exception as e:
+
+        print(
+            "Fallback vessel search error:",
+            e
+        )
+
+    # ========================================================
+    # NOT FOUND
+    # ========================================================
+
+    print(
+        f"MMSI {target} not found in "
+        f"VesselAPI, AISStream, or fallback."
     )
 
-    vessel = AIS_VESSELS.get(
-        str(target)
-    )
+    return None
 
-    if vessel is not None:
 
-        return vessel
-
-    fallback = (
-        load_fallback_vessels()
-    )
-
-    return fallback.get(
-        str(target)
-    )
+# ============================================================
+# AIS RISK FOR ONE VESSEL
+# ============================================================
 
 
 # ============================================================
@@ -3201,7 +4848,7 @@ def optimize_route(
 
 
 # ============================================================
-# PPO ROUTE FROM AIS
+# PPO ROUTE FROM AIS - SAFE VERSION
 # ============================================================
 
 @app.post(
@@ -3211,28 +4858,24 @@ def optimize_route_from_ais(
     request: AISRouteRequest
 ):
 
-
-
-    # --------------------------------------------------------
-    # CHECK PPO
-    # --------------------------------------------------------
+    # ========================================================
+    # CHECK PPO MODEL
+    # ========================================================
 
     if ppo_model is None:
 
         raise HTTPException(
             status_code=500,
-            detail=
-                "PPO model is not loaded."
+            detail="PPO model is not loaded."
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # FIND VESSEL
-    # --------------------------------------------------------
+    # VesselAPI is first through find_vessel_by_mmsi()
+    # ========================================================
 
-    vessel = (
-        find_vessel_by_mmsi(
-            request.mmsi
-        )
+    vessel = find_vessel_by_mmsi(
+        request.mmsi
     )
 
     if vessel is None:
@@ -3240,15 +4883,14 @@ def optimize_route_from_ais(
         raise HTTPException(
             status_code=404,
             detail=(
-                f"Vessel MMSI "
-                f"{request.mmsi} "
+                f"Vessel MMSI {request.mmsi} "
                 "not found."
             )
         )
 
-    # --------------------------------------------------------
-    # CURRENT POSITION
-    # --------------------------------------------------------
+    # ========================================================
+    # CURRENT VESSEL DATA
+    # ========================================================
 
     current_lat = float(
         vessel["latitude"]
@@ -3261,7 +4903,10 @@ def optimize_route_from_ais(
     current_speed = float(
         vessel.get(
             "speed",
-            0.0
+            vessel.get(
+                "sog",
+                0.0
+            )
         )
     )
 
@@ -3270,7 +4915,10 @@ def optimize_route_from_ais(
             "heading",
             vessel.get(
                 "course",
-                0.0
+                vessel.get(
+                    "cog",
+                    0.0
+                )
             )
         )
     )
@@ -3283,9 +4931,35 @@ def optimize_route_from_ais(
         request.destination_lon
     )
 
-    # --------------------------------------------------------
+    # ========================================================
+    # BASIC COORDINATE VALIDATION
+    # ========================================================
+
+    if not (
+        -90.0 <= current_lat <= 90.0
+        and
+        -180.0 <= current_lon <= 180.0
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid current vessel coordinates."
+        )
+
+    if not (
+        -90.0 <= destination_lat <= 90.0
+        and
+        -180.0 <= destination_lon <= 180.0
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid destination coordinates."
+        )
+
+    # ========================================================
     # OCEAN VALIDATION
-    # --------------------------------------------------------
+    # ========================================================
 
     if point_is_land(
         current_lat,
@@ -3294,8 +4968,7 @@ def optimize_route_from_ais(
 
         raise HTTPException(
             status_code=400,
-            detail=
-                "Current vessel position is on land."
+            detail="Current vessel position is on land."
         )
 
     if point_is_land(
@@ -3305,33 +4978,26 @@ def optimize_route_from_ais(
 
         raise HTTPException(
             status_code=400,
-            detail=
-                "Destination is on land."
+            detail="Destination is on land."
         )
 
-    # --------------------------------------------------------
-    # DEFAULT ROUTE STATUS
-    # --------------------------------------------------------
+    # ========================================================
+    # DEFAULT HAZARD STATE
+    # ========================================================
 
-    route_mode = (
-        "OPTIMIZED"
-    )
+    route_mode = "OPTIMIZED"
 
-    hazard = (
-        "NO_WAVE_DATA"
-    )
+    hazard = "NO_WAVE_DATA"
 
-    wave_status = (
-        "NO_WAVE_DATA"
-    )
+    wave_status = "NO_WAVE_DATA"
 
     wave_prediction = None
 
     xgb_probability = None
 
-    # --------------------------------------------------------
-    # MONITORING PAGE HAZARD DECISION
-    # --------------------------------------------------------
+    # ========================================================
+    # MONITORING PAGE HAZARD
+    # ========================================================
 
     if request.route_hazard:
 
@@ -3365,12 +5031,9 @@ def optimize_route_from_ais(
 
             route_mode = "OPTIMIZED"
 
-
-
-
-    # --------------------------------------------------------
-    # NDBC HIGH-WAVE XGBOOST
-    # --------------------------------------------------------
+    # ========================================================
+    # NDBC XGBOOST HIGH-WAVE MODEL
+    # ========================================================
 
     if (
         request.ndbc_observations
@@ -3394,6 +5057,7 @@ def optimize_route_from_ais(
             "PRES",
             "ATMP",
             "WTMP"
+
         ]
 
         features = []
@@ -3420,45 +5084,31 @@ def optimize_route_from_ais(
         )
 
         xgb_probability = float(
-
             xgb_high_wave_model
             .predict_proba(
                 X
             )[0][1]
-
         )
 
         if xgb_probability >= 0.50:
 
-            hazard = (
-                "HIGH_WAVE"
-            )
+            hazard = "HIGH_WAVE"
 
-            wave_status = (
-                "HIGH_WAVE"
-            )
+            wave_status = "HIGH_WAVE"
 
-            route_mode = (
-                "SAFEST"
-            )
+            route_mode = "SAFEST"
 
         else:
 
-            hazard = (
-                "NORMAL"
-            )
+            hazard = "NORMAL"
 
-            wave_status = (
-                "LOW"
-            )
+            wave_status = "LOW"
 
-            route_mode = (
-                "OPTIMIZED"
-            )
+            route_mode = "OPTIMIZED"
 
-    # --------------------------------------------------------
-    # OTHERWISE USE LIVE LSTM RESULT
-    # --------------------------------------------------------
+    # ========================================================
+    # LSTM FALLBACK
+    # ========================================================
 
     elif len(
         LSTM_WAVE_HISTORY
@@ -3486,33 +5136,21 @@ def optimize_route_from_ais(
 
             if wave_prediction >= 3.0:
 
-                hazard = (
-                    "HIGH_WAVE"
-                )
+                hazard = "HIGH_WAVE"
 
-                route_mode = (
-                    "SAFEST"
-                )
+                route_mode = "SAFEST"
 
             elif wave_prediction >= 2.0:
 
-                hazard = (
-                    "MODERATE"
-                )
+                hazard = "MODERATE"
 
-                route_mode = (
-                    "OPTIMIZED"
-                )
+                route_mode = "OPTIMIZED"
 
             else:
 
-                hazard = (
-                    "NORMAL"
-                )
+                hazard = "NORMAL"
 
-                route_mode = (
-                    "OPTIMIZED"
-                )
+                route_mode = "OPTIMIZED"
 
         except Exception as e:
 
@@ -3521,60 +5159,50 @@ def optimize_route_from_ais(
                 e
             )
 
-    # --------------------------------------------------------
-    # INITIAL ROUTE VALUES
-    # --------------------------------------------------------
+    # ========================================================
+    # INITIAL ROUTE INFORMATION
+    # ========================================================
 
-    initial_distance = (
-        haversine_km(
-            current_lat,
-            current_lon,
-            destination_lat,
-            destination_lon
-        )
+    initial_distance = haversine_km(
+        current_lat,
+        current_lon,
+        destination_lat,
+        destination_lon
     )
 
-    desired_bearing = (
-        bearing_degrees(
-            current_lat,
-            current_lon,
-            destination_lat,
-            destination_lon
-        )
+    direct_bearing = bearing_degrees(
+        current_lat,
+        current_lon,
+        destination_lat,
+        destination_lon
     )
 
-    heading_error = (
-        angle_difference(
-            current_heading,
-            desired_bearing
-        )
+    heading_error = angle_difference(
+        current_heading,
+        direct_bearing
     )
 
-    # --------------------------------------------------------
-    # PPO ACTIONS
-    # --------------------------------------------------------
+    # ========================================================
+    # PPO ACTION MAP
+    # ========================================================
 
     turn_amounts = {
 
         0: -10.0,
-
         1: -5.0,
-
         2: 0.0,
-
         3: 5.0,
-
         4: 10.0
+
     }
 
-    # --------------------------------------------------------
-    # START ROUTE
-    # --------------------------------------------------------
+    # ========================================================
+    # ROUTE START
+    # ========================================================
 
     route_points = [
 
         {
-
             "latitude":
                 current_lat,
 
@@ -3584,64 +5212,75 @@ def optimize_route_from_ais(
             "action":
                 None,
 
+            "turn_angle":
+                0.0,
+
+            "ppo_turn_angle":
+                0.0,
+
             "heading":
                 current_heading,
 
             "step":
                 0
         }
+
     ]
 
-    simulation_lat = (
-        current_lat
-    )
+    simulation_lat = current_lat
 
-    simulation_lon = (
-        current_lon
-    )
+    simulation_lon = current_lon
 
-    simulation_heading = (
-        current_heading
-    )
+    simulation_heading = current_heading
 
-    # --------------------------------------------------------
+    # ========================================================
     # ROUTE SIMULATION
-    # --------------------------------------------------------
+    # ========================================================
 
-    max_steps = 120
+    max_steps = 150
+
+    reached_destination = False
 
     for step in range(
         max_steps
     ):
 
-        distance = (
-            haversine_km(
-                simulation_lat,
-                simulation_lon,
-                destination_lat,
-                destination_lon
-            )
+        distance = haversine_km(
+            simulation_lat,
+            simulation_lon,
+            destination_lat,
+            destination_lon
         )
+
+        # ----------------------------------------------------
+        # DESTINATION REACHED
+        # ----------------------------------------------------
 
         if distance <= 2.0:
 
+            reached_destination = True
+
             break
 
-        desired_bearing = (
-            bearing_degrees(
-                simulation_lat,
-                simulation_lon,
-                destination_lat,
-                destination_lon
-            )
+        # ----------------------------------------------------
+        # DIRECT BEARING
+        # ----------------------------------------------------
+
+        desired_bearing = bearing_degrees(
+            simulation_lat,
+            simulation_lon,
+            destination_lat,
+            destination_lon
         )
 
-        heading_error = (
-            angle_difference(
-                simulation_heading,
-                desired_bearing
-            )
+        heading_error = angle_difference(
+            simulation_heading,
+            desired_bearing
         )
+
+        # ----------------------------------------------------
+        # PPO OBSERVATION
+        # ----------------------------------------------------
 
         observation = np.array(
 
@@ -3677,12 +5316,16 @@ def optimize_route_from_ais(
                     180.0
                 ) - 1.0,
 
-                heading_error /
-                180.0
+                heading_error / 180.0
+
             ],
 
             dtype=np.float32
         )
+
+        # ----------------------------------------------------
+        # PPO PREDICTION
+        # ----------------------------------------------------
 
         action, _ = (
             ppo_model.predict(
@@ -3703,34 +5346,78 @@ def optimize_route_from_ais(
             turn_amounts[action]
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # SAFETY CANDIDATES
-        # ----------------------------------------------------
+        #
+        # IMPORTANT:
+        # Direct bearing is now included.
+        # This prevents PPO from getting trapped near land.
+        # ====================================================
 
         candidate_turns = [
 
+            # PPO choice first
             ppo_turn,
 
             ppo_turn + 5,
-
             ppo_turn - 5,
 
             ppo_turn + 10,
-
             ppo_turn - 10,
 
             ppo_turn + 20,
-
             ppo_turn - 20,
 
             ppo_turn + 45,
-
             ppo_turn - 45,
 
             ppo_turn + 90,
+            ppo_turn - 90,
 
-            ppo_turn - 90
+            # DIRECT DESTINATION BEARING
+            angle_difference(
+                simulation_heading,
+                desired_bearing
+            ),
+
+            # Small corrections toward destination
+            angle_difference(
+                simulation_heading,
+                desired_bearing
+            ) + 10,
+
+            angle_difference(
+                simulation_heading,
+                desired_bearing
+            ) - 10
+
         ]
+
+        # ----------------------------------------------------
+        # REMOVE DUPLICATES
+        # ----------------------------------------------------
+
+        unique_turns = []
+
+        for turn in candidate_turns:
+
+            turn = float(turn)
+
+            if not any(
+                abs(
+                    turn - existing
+                ) < 0.01
+                for existing
+                in unique_turns
+            ):
+
+                unique_turns.append(
+                    turn
+                )
+
+        # ----------------------------------------------------
+        # STEP SIZE
+        # ----------------------------------------------------
 
         step_distance = min(
 
@@ -3740,19 +5427,18 @@ def optimize_route_from_ais(
                 0.5,
                 distance / 20.0
             )
+
         )
 
         selected = None
 
         earth_radius = 6371.0
 
-        # ----------------------------------------------------
-        # TEST EACH TURN
-        # ----------------------------------------------------
+        # ====================================================
+        # TEST EACH CANDIDATE
+        # ====================================================
 
-        for turn in (
-            candidate_turns
-        ):
+        for turn in unique_turns:
 
             candidate_heading = (
 
@@ -3784,6 +5470,7 @@ def optimize_route_from_ais(
                 math.cos(
                     heading_rad
                 )
+
             )
 
             cos_lat = max(
@@ -3814,6 +5501,7 @@ def optimize_route_from_ais(
                 math.sin(
                     heading_rad
                 )
+
             )
 
             candidate_lat = math.degrees(
@@ -3824,6 +5512,10 @@ def optimize_route_from_ais(
                 new_lon_rad
             )
 
+            # ------------------------------------------------
+            # NORMALIZE LONGITUDE
+            # ------------------------------------------------
+
             if candidate_lon > 180:
 
                 candidate_lon -= 360
@@ -3832,12 +5524,20 @@ def optimize_route_from_ais(
 
                 candidate_lon += 360
 
+            # ------------------------------------------------
+            # LAND POINT CHECK
+            # ------------------------------------------------
+
             if point_is_land(
                 candidate_lat,
                 candidate_lon
             ):
 
                 continue
+
+            # ------------------------------------------------
+            # LAND SEGMENT CHECK
+            # ------------------------------------------------
 
             if segment_crosses_land(
 
@@ -3851,42 +5551,72 @@ def optimize_route_from_ais(
 
                 continue
 
+            # ------------------------------------------------
+            # ALSO CHECK SEGMENT TO DESTINATION
+            #
+            # If candidate is close enough to destination,
+            # make sure final approach is safe.
+            # ------------------------------------------------
+
+            remaining_after_candidate = (
+                haversine_km(
+                    candidate_lat,
+                    candidate_lon,
+                    destination_lat,
+                    destination_lon
+                )
+            )
+
+            if remaining_after_candidate <= 8.0:
+
+                if segment_crosses_land(
+
+                    candidate_lat,
+                    candidate_lon,
+
+                    destination_lat,
+                    destination_lon
+
+                ):
+
+                    continue
+
             selected = (
 
                 candidate_lat,
-
                 candidate_lon,
-
                 candidate_heading,
-
                 turn
+
+            )
+
+            break
+
+        # ====================================================
+        # NO SAFE PPO STEP
+        # ====================================================
+
+        if selected is None:
+
+            print(
+                "PPO could not find a safe step."
+            )
+
+            print(
+                "Switching to ocean-safe fallback."
             )
 
             break
 
         # ----------------------------------------------------
-        # NO SAFE STEP
+        # APPLY SELECTED STEP
         # ----------------------------------------------------
-
-        if selected is None:
-
-            raise HTTPException(
-
-                status_code=400,
-
-                detail=
-                    "PPO could not find "
-                    "an ocean-safe route step."
-            )
 
         (
 
             simulation_lat,
-
             simulation_lon,
-
             simulation_heading,
-
             selected_turn
 
         ) = selected
@@ -3919,47 +5649,516 @@ def optimize_route_from_ais(
                 step + 1
         })
 
+    # ========================================================
+    # SAFE FALLBACK ROUTE
+    #
+    # If PPO cannot produce a complete ocean-safe route,
+    # search for a validated sea-only route using intermediate
+    # waypoints.
+    # ========================================================
+
+    def create_safe_fallback_route():
+
+        print(
+            "Creating ocean-safe fallback route..."
+        )
+
+        # ----------------------------------------------------
+        # Candidate intermediate waypoint offsets
+        # ----------------------------------------------------
+
+        mid_lat = (
+            current_lat +
+            destination_lat
+        ) / 2.0
+
+        mid_lon = (
+            current_lon +
+            destination_lon
+        ) / 2.0
+
+        offset_values = [
+
+            0.0,
+
+            0.15,
+            -0.15,
+
+            0.30,
+            -0.30,
+
+            0.50,
+            -0.50,
+
+            0.75,
+            -0.75,
+
+            1.00,
+            -1.00
+
+        ]
+
+        candidates = []
+
+        # ----------------------------------------------------
+        # Direct route
+        # ----------------------------------------------------
+
+        candidates.append(
+            [
+                (
+                    current_lat,
+                    current_lon
+                ),
+
+                (
+                    destination_lat,
+                    destination_lon
+                )
+            ]
+        )
+
+        # ----------------------------------------------------
+        # Latitude detours
+        # ----------------------------------------------------
+
+        for offset in offset_values:
+
+            candidates.append(
+
+                [
+
+                    (
+                        current_lat,
+                        current_lon
+                    ),
+
+                    (
+                        mid_lat + offset,
+                        mid_lon
+                    ),
+
+                    (
+                        destination_lat,
+                        destination_lon
+                    )
+
+                ]
+
+            )
+
+        # ----------------------------------------------------
+        # Longitude detours
+        # ----------------------------------------------------
+
+        for offset in offset_values:
+
+            candidates.append(
+
+                [
+
+                    (
+                        current_lat,
+                        current_lon
+                    ),
+
+                    (
+                        mid_lat,
+                        mid_lon + offset
+                    ),
+
+                    (
+                        destination_lat,
+                        destination_lon
+                    )
+
+                ]
+
+            )
+
+        # ----------------------------------------------------
+        # Two-waypoint detours
+        # ----------------------------------------------------
+
+        for offset in [
+
+            0.30,
+            -0.30,
+            0.50,
+            -0.50,
+            0.75,
+            -0.75
+
+        ]:
+
+            candidates.append(
+
+                [
+
+                    (
+                        current_lat,
+                        current_lon
+                    ),
+
+                    (
+                        current_lat + offset,
+                        current_lon + offset
+                    ),
+
+                    (
+                        destination_lat - offset,
+                        destination_lon + offset
+                    ),
+
+                    (
+                        destination_lat,
+                        destination_lon
+                    )
+
+                ]
+
+            )
+
+        # ====================================================
+        # VALIDATE CANDIDATES
+        # ====================================================
+
+        valid_routes = []
+
+        for candidate in candidates:
+
+            try:
+
+                # --------------------------------------------
+                # Point validation
+                # --------------------------------------------
+
+                invalid_point = False
+
+                for lat, lon in candidate:
+
+                    if point_is_land(
+                        lat,
+                        lon
+                    ):
+
+                        invalid_point = True
+
+                        break
+
+                if invalid_point:
+
+                    continue
+
+                # --------------------------------------------
+                # Segment validation
+                # --------------------------------------------
+
+                invalid_segment = False
+
+                for i in range(
+                    len(candidate) - 1
+                ):
+
+                    lat1, lon1 = (
+                        candidate[i]
+                    )
+
+                    lat2, lon2 = (
+                        candidate[i + 1]
+                    )
+
+                    if segment_crosses_land(
+
+                        lat1,
+                        lon1,
+
+                        lat2,
+                        lon2
+
+                    ):
+
+                        invalid_segment = True
+
+                        break
+
+                if invalid_segment:
+
+                    continue
+
+                # --------------------------------------------
+                # Route is safe
+                # --------------------------------------------
+
+                distance = 0.0
+
+                for i in range(
+                    len(candidate) - 1
+                ):
+
+                    distance += (
+                        haversine_km(
+
+                            candidate[i][0],
+                            candidate[i][1],
+
+                            candidate[i + 1][0],
+                            candidate[i + 1][1]
+
+                        )
+                    )
+
+                valid_routes.append(
+                    (
+                        distance,
+                        candidate
+                    )
+                )
+
+            except Exception as e:
+
+                print(
+                    "Fallback validation error:",
+                    e
+                )
+
+        # ====================================================
+        # SELECT SHORTEST SAFE ROUTE
+        # ====================================================
+
+        if not valid_routes:
+
+            return None
+
+        valid_routes.sort(
+            key=lambda x: x[0]
+        )
+
+        return valid_routes[0][1]
+
+    # ========================================================
+    # CHECK CURRENT PPO ROUTE
+    # ========================================================
+
+    ppo_complete = (
+
+        reached_destination
+
+        and
+
+        len(route_points) >= 2
+
+    )
+
     # --------------------------------------------------------
-    # DESTINATION
+    # Check whether PPO route can safely reach destination
     # --------------------------------------------------------
 
-    route_points.append({
+    if ppo_complete:
 
-        "latitude":
+        last_point = route_points[-1]
+
+        if segment_crosses_land(
+
+            last_point["latitude"],
+            last_point["longitude"],
+
             destination_lat,
+            destination_lon
 
-        "longitude":
-            destination_lon,
+        ):
 
-        "action":
-            None,
+            ppo_complete = False
 
-        "heading":
-            None,
+    # ========================================================
+    # FALLBACK IF PPO FAILED
+    # ========================================================
 
-        "step":
-            len(route_points)
-    })
+    if not ppo_complete:
 
-    # --------------------------------------------------------
+        fallback_route = (
+            create_safe_fallback_route()
+        )
+
+        if fallback_route is None:
+
+            raise HTTPException(
+
+                status_code=400,
+
+                detail=(
+                    "No ocean-safe route "
+                    "could be generated "
+                    "between the vessel "
+                    "and destination."
+                )
+
+            )
+
+        # ----------------------------------------------------
+        # Convert fallback route into waypoints
+        # ----------------------------------------------------
+
+        route_points = []
+
+        for index, point in enumerate(
+            fallback_route
+        ):
+
+            lat, lon = point
+
+            route_points.append({
+
+                "latitude":
+                    float(lat),
+
+                "longitude":
+                    float(lon),
+
+                "action":
+                    None,
+
+                "turn_angle":
+                    None,
+
+                "ppo_turn_angle":
+                    None,
+
+                "heading":
+                    None,
+
+                "step":
+                    index
+            })
+
+        route_mode = (
+            "SAFE_FALLBACK"
+            if hazard != "HIGH_WAVE"
+            else
+            "SAFEST_FALLBACK"
+        )
+
+    else:
+
+        # ----------------------------------------------------
+        # PPO reached destination
+        # Add exact destination only if safe.
+        # ----------------------------------------------------
+
+        last_point = route_points[-1]
+
+        if not segment_crosses_land(
+
+            last_point["latitude"],
+            last_point["longitude"],
+
+            destination_lat,
+            destination_lon
+
+        ):
+
+            route_points.append({
+
+                "latitude":
+                    destination_lat,
+
+                "longitude":
+                    destination_lon,
+
+                "action":
+                    None,
+
+                "turn_angle":
+                    None,
+
+                "ppo_turn_angle":
+                    None,
+
+                "heading":
+                    None,
+
+                "step":
+                    len(route_points)
+            })
+
+    # ========================================================
     # FINAL LAND CHECK
-    # --------------------------------------------------------
+    # ========================================================
 
     if route_crosses_land(
         route_points
     ):
 
-        raise HTTPException(
+        # ----------------------------------------------------
+        # One last fallback attempt
+        # ----------------------------------------------------
 
-            status_code=400,
-
-            detail=
-                "Generated route intersects land."
+        fallback_route = (
+            create_safe_fallback_route()
         )
 
-    # --------------------------------------------------------
+        if fallback_route is None:
+
+            raise HTTPException(
+
+                status_code=400,
+
+                detail=(
+                    "Generated route "
+                    "intersects land and "
+                    "no safe fallback "
+                    "was found."
+                )
+
+            )
+
+        route_points = [
+
+            {
+
+                "latitude":
+                    float(lat),
+
+                "longitude":
+                    float(lon),
+
+                "action":
+                    None,
+
+                "turn_angle":
+                    None,
+
+                "ppo_turn_angle":
+                    None,
+
+                "heading":
+                    None,
+
+                "step":
+                    index
+
+            }
+
+            for index, (
+                lat,
+                lon
+            )
+            in enumerate(
+                fallback_route
+            )
+
+        ]
+
+        route_mode = (
+            "SAFEST_FALLBACK"
+            if hazard == "HIGH_WAVE"
+            else
+            "SAFE_FALLBACK"
+        )
+
+    # ========================================================
     # ROUTE DISTANCE
-    # --------------------------------------------------------
+    # ========================================================
 
     route_distance = 0.0
 
@@ -3985,30 +6184,37 @@ def optimize_route_from_ais(
                 route_points[i + 1][
                     "longitude"
                 ]
+
             )
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # ESTIMATED TIME
-    # --------------------------------------------------------
+    # ========================================================
 
     speed_kmh = (
+
         max(
             current_speed,
             0.1
         )
+
         *
+
         1.852
+
     )
 
     estimated_time_hours = (
+
         route_distance /
         speed_kmh
+
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # FINAL RESPONSE
-    # --------------------------------------------------------
+    # ========================================================
 
     return {
 
@@ -4048,6 +6254,7 @@ def optimize_route_from_ais(
 
             "longitude":
                 current_lon
+
         },
 
         "destination": {
@@ -4057,6 +6264,7 @@ def optimize_route_from_ais(
 
             "longitude":
                 destination_lon
+
         },
 
         "initial_distance_km":
@@ -4090,6 +6298,9 @@ def optimize_route_from_ais(
         "land_check":
             True,
 
+        "route_validated":
+            True,
+
         "waypoints":
             route_points,
 
@@ -4097,27 +6308,5 @@ def optimize_route_from_ais(
             len(
                 route_points
             )
+
     }
-
-
-# ============================================================
-# START
-# ============================================================
-
-if __name__ == "__main__":
-
-    import uvicorn
-
-    uvicorn.run(
-
-        "main:app",
-
-        host=
-            "127.0.0.1",
-
-        port=
-            8000,
-
-        reload=
-            True
-    )
