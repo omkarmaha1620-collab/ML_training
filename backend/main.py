@@ -50,10 +50,6 @@ AISSTREAM_API_KEY = os.getenv(
     "AISSTREAM_API_KEY"
 )
 
-SHIPFINDER_API_KEY = os.getenv(
-    "SHIPFINDER_API_KEY"
-)
-
 # ============================================================
 # VESSELAPI
 # ============================================================
@@ -80,14 +76,6 @@ VESSELAPI_CONNECTED = False
 VESSELAPI_LAST_UPDATE = None
 
 VESSELAPI_LAST_ERROR = None
-
-WEATHER_API_KEY = os.getenv(
-    "WEATHER_API_KEY"
-)
-
-SHIPFINDER_SEED_MMSI = 477232800
-
-
 # ============================================================
 # MODEL PATHS
 # ============================================================
@@ -3577,25 +3565,6 @@ def health():
 # AIS RAW
 # ============================================================
 
-@app.get("/ais/raw")
-async def get_ais_raw():
-
-    return {
-
-        "status":
-            "success",
-
-        "count":
-            len(AIS_VESSELS),
-
-        "vessels":
-            list(
-                AIS_VESSELS.values()
-            ),
-
-        "source":
-            "AISStream"
-    }
 
 
 # ============================================================
@@ -4228,159 +4197,12 @@ async def get_all_vessel_risks():
 # XGBOOST BASIC
 # ============================================================
 
-@app.post(
-    "/predict/xgboost"
-)
-def predict_xgboost(
-    request: PredictionRequest
-):
-
-    if xgb_model is None:
-
-        raise HTTPException(
-            status_code=500,
-            detail=
-                "XGBoost model is not loaded."
-        )
-
-    if len(
-        request.features
-    ) != 10:
-
-        raise HTTPException(
-            status_code=400,
-            detail=
-                "XGBoost expects 10 features."
-        )
-
-    X = np.array(
-        [request.features],
-        dtype=np.float32
-    )
-
-    prediction = (
-        xgb_model.predict(
-            X
-        )
-    )
-
-    return {
-
-        "model":
-            "XGBoost",
-
-        "prediction":
-            prediction.tolist()
-    }
 
 
 # ============================================================
 # HIGH WAVE XGBOOST
 # ============================================================
 
-@app.post(
-    "/predict/high-wave"
-)
-def predict_high_wave(
-    request: HighWaveRequest
-):
-
-    if xgb_high_wave_model is None:
-
-        raise HTTPException(
-            status_code=500,
-            detail=
-                "High-wave XGBoost model "
-                "is not loaded."
-        )
-
-    if len(
-        request.observations
-    ) != 3:
-
-        raise HTTPException(
-            status_code=400,
-            detail=
-                "Exactly 3 observations required."
-        )
-
-    feature_names = [
-
-        "WVHT",
-        "WSPD",
-        "GST",
-        "DPD",
-        "APD",
-        "PRES",
-        "ATMP",
-        "WTMP"
-    ]
-
-    features = []
-
-    for observation in (
-        request.observations
-    ):
-
-        values = (
-            observation.model_dump()
-        )
-
-        for name in feature_names:
-
-            features.append(
-                float(
-                    values[name]
-                )
-            )
-
-    X = np.array(
-        [features],
-        dtype=np.float32
-    )
-
-    probability = float(
-        xgb_high_wave_model
-        .predict_proba(
-            X
-        )[0][1]
-    )
-
-    prediction = int(
-        probability >= 0.50
-    )
-
-    return {
-
-        "model":
-            "XGBoost NDBC",
-
-        "prediction":
-            prediction,
-
-        "hazard":
-            (
-                "HIGH_WAVE"
-                if prediction
-                else
-                "NORMAL"
-            ),
-
-        "probability":
-            probability,
-
-        "probability_percent":
-            round(
-                probability * 100,
-                2
-            ),
-
-        "observations_used":
-            3,
-
-        "features_used":
-            24
-    }
 
 
 # ============================================================
@@ -4461,83 +4283,12 @@ def add_wave_observation(
 # WAVE OBSERVATION API
 # ============================================================
 
-@app.post(
-    "/wave/observation"
-)
-def add_wave_observation_api(
-    observation: dict
-):
-
-    for field in [
-        "VHM0",
-        "VTPK",
-        "VPED"
-    ]:
-
-        if field not in observation:
-
-            raise HTTPException(
-                status_code=400,
-                detail=
-                    f"Missing field: {field}"
-            )
-
-    success = (
-        add_wave_observation(
-            observation["VHM0"],
-            observation["VTPK"],
-            observation["VPED"],
-            observation.get(
-                "timestamp"
-            )
-        )
-    )
-
-    if not success:
-
-        raise HTTPException(
-            status_code=400,
-            detail=
-                "Invalid wave observation."
-        )
-
-    return {
-
-        "status":
-            "success",
-
-        "count":
-            len(
-                LSTM_WAVE_HISTORY
-            ),
-
-        "observation":
-            LSTM_WAVE_HISTORY[-1]
-    }
 
 
 # ============================================================
 # WAVE HISTORY
 # ============================================================
 
-@app.get(
-    "/wave/history"
-)
-def get_wave_history():
-
-    return {
-
-        "status":
-            "success",
-
-        "count":
-            len(
-                LSTM_WAVE_HISTORY
-            ),
-
-        "history":
-            LSTM_WAVE_HISTORY
-    }
 
 
 @app.get(
@@ -4712,46 +4463,6 @@ def run_lstm_prediction(
 # MANUAL LSTM
 # ============================================================
 
-@app.post(
-    "/predict/lstm"
-)
-def predict_lstm(
-    request: LSTMRequest
-):
-
-    if len(
-        request.sequence
-    ) != 8:
-
-        raise HTTPException(
-            status_code=400,
-            detail=
-                "LSTM requires 8 observations."
-        )
-
-    history = [
-
-        {
-
-            "VHM0":
-                row[0],
-
-            "VTPK":
-                row[1],
-
-            "VPED":
-                row[2]
-
-        }
-
-        for row in
-        request.sequence
-
-    ]
-
-    return run_lstm_prediction(
-        history
-    )
 
 
 # ============================================================
@@ -4800,51 +4511,6 @@ def predict_lstm_live():
 # BASIC PPO
 # ============================================================
 
-@app.post(
-    "/optimize-route"
-)
-def optimize_route(
-    request: PPORequest
-):
-
-    if ppo_model is None:
-
-        raise HTTPException(
-            status_code=500,
-            detail=
-                "PPO model is not loaded."
-        )
-
-    if len(
-        request.observation
-    ) != 9:
-
-        raise HTTPException(
-            status_code=400,
-            detail=
-                "PPO expects 9 observations."
-        )
-
-    observation = np.array(
-        request.observation,
-        dtype=np.float32
-    )
-
-    action, _ = (
-        ppo_model.predict(
-            observation,
-            deterministic=True
-        )
-    )
-
-    return {
-
-        "model":
-            "PPO",
-
-        "action":
-            int(action)
-    }
 
 
 # ============================================================
@@ -6310,3 +5976,5 @@ def optimize_route_from_ais(
             )
 
     }
+
+

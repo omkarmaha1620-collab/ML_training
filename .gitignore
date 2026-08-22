@@ -23,3 +23,13 @@ build/
 RL/zenodo_raw_filtered.csv
 RL/rl_training_dataset.csv
 RL/rl_training_dataset_v2.csv
+
+# Virtual environment
+backend/venv/
+
+# Old/archived models
+archive/
+
+# Local backup files
+backend/main_backup.py
+backend/main_before_endpoint_cleanup.py
