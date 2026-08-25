@@ -872,7 +872,7 @@ body {
 }
 
 .prediction-fill {
-    width: 8%;
+    width: 0%;
     height: 100%;
 
     border-radius: inherit;
@@ -1183,4 +1183,25 @@ body {
        Ocean scene still has its own overflow:hidden.
     */
     overflow: visible !important;
+    /* ============================================================
+   OFFLINE ROUTE BUTTON
+   ============================================================ */
+
+.route-button.offline-disabled,
+#routeButton.offline-disabled {
+
+    opacity: 0.45;
+
+    cursor: not-allowed;
+
+    filter: grayscale(0.5);
+}
+
+
+#routeButton:disabled {
+
+    opacity: 0.45;
+
+    cursor: not-allowed;
+}
 }

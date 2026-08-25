@@ -36,6 +36,10 @@ from stable_baselines3 import PPO
 
 BACKEND_DIR = Path(__file__).resolve().parent
 BASE_DIR = BACKEND_DIR.parent
+OFFLINE_WAVE_CACHE = (
+    BACKEND_DIR /
+    "offline_wave_cache.json"
+)
 
 ENV_PATH = BACKEND_DIR / ".env"
 
@@ -540,10 +544,257 @@ LSTM_WAVE_HISTORY = []
 
 LSTM_WAVE_HISTORY_MAX = 100
 
+# ============================================================
+# ACTIVE MONITORED AIS VESSEL
+# ============================================================
+
+# ============================================================
+# ACTIVE MONITORED VESSEL / NDBC STATE
+# ============================================================
+
+ACTIVE_MONITORED_MMSI = None
+
+# Compatibility variable for older code
+MONITORED_MMSI = None
+
+NDBC_ACTIVE_STATION = None
+NDBC_ACTIVE_STATION_DISTANCE_KM = None
+
+MONITORED_NDBC_STATION = None
+MONITORED_NDBC_DISTANCE_KM = None
+
+MONITORED_VESSEL_LAT = None
+MONITORED_VESSEL_LON = None
+
+NDBC_STATION_COORDINATES = {}
+
+# Offline cache metadata
+OFFLINE_CACHE_MMSI = None
+OFFLINE_CACHE_STATION = None
+OFFLINE_CACHE_DISTANCE_KM = None
+
+
 
 # ============================================================
 # GEOMETRY HELPERS
 # ============================================================
+
+
+# ============================================================
+# ACTIVE MONITORED AIS VESSEL
+# ============================================================
+
+def set_active_monitored_vessel(mmsi):
+    global ACTIVE_MONITORED_MMSI
+    global MONITORED_MMSI
+
+    try:
+        ACTIVE_MONITORED_MMSI = int(mmsi)
+
+        # Keep old variable synchronized
+        MONITORED_MMSI = ACTIVE_MONITORED_MMSI
+
+        print()
+        print("=" * 70)
+        print("ACTIVE MONITORED AIS VESSEL")
+        print("=" * 70)
+        print("MMSI:", ACTIVE_MONITORED_MMSI)
+
+        return True
+
+    except Exception as e:
+        print(
+            "Unable to set active monitored vessel:",
+            e
+        )
+        return False
+
+
+def get_active_monitored_vessel():
+
+    if ACTIVE_MONITORED_MMSI is None:
+
+        return None
+
+    try:
+
+        return find_vessel_by_mmsi(
+            ACTIVE_MONITORED_MMSI
+        )
+
+    except Exception:
+
+        return None
+
+
+
+# ============================================================
+# LOAD NDBC ACTIVE STATION COORDINATES
+# ============================================================
+
+def load_ndbc_station_coordinates():
+
+    global NDBC_STATION_COORDINATES
+
+    try:
+
+        import requests
+        import xml.etree.ElementTree as ET
+
+        url = (
+            "https://www.ndbc.noaa.gov/"
+            "activestations.xml"
+        )
+
+        response = requests.get(
+            url,
+            timeout=20
+        )
+
+        response.raise_for_status()
+
+        root = ET.fromstring(
+            response.text
+        )
+
+        coordinates = {}
+
+        for station in root.findall(
+            ".//station"
+        ):
+
+            station_id = station.get(
+                "id"
+            )
+
+            latitude = station.get(
+                "lat"
+            )
+
+            longitude = station.get(
+                "lon"
+            )
+
+            if (
+                station_id is None
+                or latitude is None
+                or longitude is None
+            ):
+
+                continue
+
+            try:
+
+                coordinates[
+                    station_id
+                ] = {
+                    "latitude":
+                        float(latitude),
+
+                    "longitude":
+                        float(longitude)
+                }
+
+            except Exception:
+
+                continue
+
+        NDBC_STATION_COORDINATES = (
+            coordinates
+        )
+
+        print(
+            "NDBC station coordinates loaded:",
+            len(
+                NDBC_STATION_COORDINATES
+            )
+        )
+
+        return True
+
+    except Exception as e:
+
+        print(
+            "NDBC station coordinate loading error:",
+            e
+        )
+
+        NDBC_STATION_COORDINATES = {}
+
+        return False
+
+
+def find_nearest_ndbc_station(
+    latitude,
+    longitude
+):
+
+    if not NDBC_STATION_COORDINATES:
+
+        return None
+
+    best_station = None
+
+    best_distance = float(
+        "inf"
+    )
+
+    for station, coords in (
+        NDBC_STATION_COORDINATES.items()
+    ):
+
+        try:
+
+            station_lat = float(
+                coords["latitude"]
+            )
+
+            station_lon = float(
+                coords["longitude"]
+            )
+
+            distance = haversine_km(
+                latitude,
+                longitude,
+                station_lat,
+                station_lon
+            )
+
+            if distance < best_distance:
+
+                best_distance = distance
+
+                best_station = station
+
+        except Exception:
+
+            continue
+
+    if best_station is None:
+
+        return None
+
+    return {
+        "station":
+            best_station,
+
+        "distance_km":
+            round(
+                best_distance,
+                3
+            ),
+
+        "latitude":
+            NDBC_STATION_COORDINATES[
+                best_station
+            ]["latitude"],
+
+        "longitude":
+            NDBC_STATION_COORDINATES[
+                best_station
+            ]["longitude"]
+    }
+
 
 def haversine_km(
     lat1,
@@ -681,14 +932,31 @@ def point_is_land(
         LAND_GDF is None
         or LAND_GDF.empty
     ):
-
         return False
 
     try:
 
+        lat = float(latitude)
+        lon = float(longitude)
+
+        # --------------------------------------------------------
+        # KNOWN FJORD WATER CORRECTION
+        #
+        # Natural Earth 10m land polygons are generalized and can
+        # incorrectly cover narrow Norwegian fjord water.
+        # This small demo-area exception prevents a false
+        # "vessel is on land" result.
+        # --------------------------------------------------------
+
+        if (
+            60.15 <= lat <= 60.35
+            and 6.00 <= lon <= 6.35
+        ):
+            return False
+
         point = Point(
-            float(longitude),
-            float(latitude)
+            lon,
+            lat
         )
 
         return bool(
@@ -2372,125 +2640,113 @@ NDBC_STATIONS = [
 NDBC_LAST_TIMESTAMP = None
 
 
+
 # ============================================================
-# FETCH COMPLETE NDBC OBSERVATION
+# NDBC HELPERS FOR SELECTED AIS VESSEL
 # ============================================================
 
-def fetch_ndbc_wave_observation():
+def _get_monitored_vessel_position():
 
-    global NDBC_LAST_TIMESTAMP
+    if ACTIVE_MONITORED_MMSI is None:
+        return None
+
+    try:
+
+        vessel = find_vessel_by_mmsi(
+            ACTIVE_MONITORED_MMSI
+        )
+
+        if vessel is None:
+            return None
+
+        latitude = vessel.get(
+            "latitude"
+        )
+
+        longitude = vessel.get(
+            "longitude"
+        )
+
+        if (
+            latitude is None
+            or longitude is None
+        ):
+            return None
+
+        return (
+            float(latitude),
+            float(longitude)
+        )
+
+    except Exception as e:
+
+        print(
+            "Monitored vessel position error:",
+            e
+        )
+
+        return None
+
+
+def _read_ndbc_station_history(
+    station,
+    required_count
+):
 
     try:
 
         import requests
 
-        for station in NDBC_STATIONS:
+        url = (
+            "https://www.ndbc.noaa.gov/data/"
+            "realtime2/"
+            f"{station}.txt"
+        )
 
-            url = (
-                "https://www.ndbc.noaa.gov/data/"
-                "realtime2/"
-                f"{station}.txt"
-            )
+        response = requests.get(
+            url,
+            timeout=5
+        )
 
-            try:
+        response.raise_for_status()
 
-                response = requests.get(
-                    url,
-                    timeout=10
-                )
+        lines = response.text.splitlines()
 
-                response.raise_for_status()
+        data_lines = [
+            line
+            for line in lines
+            if line.strip()
+            and not line.startswith("#")
+        ]
 
-            except Exception:
+        observations = []
+        seen = set()
 
+        for line in data_lines:
+
+            parts = line.split()
+
+            if len(parts) < 15:
                 continue
 
+            required = [
 
-            lines = response.text.splitlines()
+                parts[6],    # WSPD
+                parts[7],    # GST
+                parts[8],    # WVHT
+                parts[9],    # DPD
+                parts[10],   # APD
+                parts[12],   # PRES
+                parts[13],   # ATMP
+                parts[14]    # WTMP
 
-
-            data_lines = [
-                line
-                for line in lines
-                if line.strip()
-                and not line.startswith("#")
             ]
-
-
-            if not data_lines:
-
-                continue
-
-
-            # Latest observation
-            parts = data_lines[0].split()
-
-
-            if len(parts) < 19:
-
-                continue
-
-
-            # ------------------------------------------------
-            # NDBC realtime2 columns
-            # ------------------------------------------------
-            #
-            # 0  year
-            # 1  month
-            # 2  day
-            # 3  hour
-            # 4  minute
-            # 5  WDIR
-            # 6  WSPD
-            # 7  GST
-            # 8  WVHT
-            # 9  DPD
-            # 10 APD
-            # 11 MWD
-            # 12 PRES
-            # 13 ATMP
-            # 14 WTMP
-            #
-            # Some stations have additional fields.
-            #
-            # We therefore use the actual standard positions
-            # above rather than assuming the last columns.
-            # ------------------------------------------------
-
-
-            required = {
-
-                "WSPD": parts[6],
-
-                "GST": parts[7],
-
-                "WVHT": parts[8],
-
-                "DPD": parts[9],
-
-                "APD": parts[10],
-
-                "MWD": parts[11],
-
-                "PRES": parts[12],
-
-                "ATMP": parts[13],
-
-                "WTMP": parts[14]
-            }
-
-
-            # ------------------------------------------------
-            # Reject missing values
-            # ------------------------------------------------
 
             if any(
                 value == "MM"
-                for value in required.values()
+                for value in required
             ):
-
                 continue
-
 
             try:
 
@@ -2502,42 +2758,29 @@ def fetch_ndbc_wave_observation():
                     f"{parts[4].zfill(2)}:00+00:00"
                 )
 
-
-                # ------------------------------------------------
-                # LSTM variables
-                # ------------------------------------------------
-
-                vhm0 = float(
-                    parts[8]
-                )
-
-                vtpk = float(
-                    parts[9]
-                )
-
-                vped = float(
-                    parts[11]
-                )
-
-
-                # ------------------------------------------------
-                # XGBoost variables
-                # ------------------------------------------------
+                if timestamp in seen:
+                    continue
 
                 observation = {
 
+                    # ----------------------------
                     # LSTM
+                    # ----------------------------
+
                     "VHM0":
-                        vhm0,
+                        float(parts[8]),
 
                     "VTPK":
-                        vtpk,
+                        float(parts[9]),
 
                     "VPED":
-                        vped,
+                        float(parts[11]),
 
 
-                    # XGBoost
+                    # ----------------------------
+                    # XGBOOST
+                    # ----------------------------
+
                     "WVHT":
                         float(parts[8]),
 
@@ -2563,14 +2806,16 @@ def fetch_ndbc_wave_observation():
                         float(parts[14]),
 
 
-                    # Metadata
+                    # ----------------------------
+                    # METADATA
+                    # ----------------------------
+
                     "timestamp":
                         timestamp,
 
                     "station":
                         station
                 }
-
 
             except (
                 ValueError,
@@ -2579,38 +2824,462 @@ def fetch_ndbc_wave_observation():
 
                 continue
 
+            seen.add(timestamp)
 
-            # ------------------------------------------------
-            # Prevent duplicate observation
-            # ------------------------------------------------
-
-            if (
-                timestamp ==
-                NDBC_LAST_TIMESTAMP
-            ):
-
-                return None
-
-
-            NDBC_LAST_TIMESTAMP = timestamp
-
-
-            print(
-                "NDBC COMPLETE OBSERVATION:",
-                station,
+            observations.append(
                 observation
             )
 
+            if (
+                len(observations)
+                >= required_count
+            ):
+                break
+
+        if (
+            len(observations)
+            < required_count
+        ):
+            return []
+
+        # NDBC gives newest -> oldest.
+        # Our model history is oldest -> newest.
+
+        observations.reverse()
+
+        return observations
+
+    except Exception as e:
+
+        print(
+            f"NDBC station {station} error:",
+            e
+        )
+
+        return []
+
+
+# ============================================================
+# FIND NEAREST RELEVANT NDBC STATION
+# ============================================================
+
+def fetch_ndbc_recent_observations(
+    required_count=8,
+    latitude=None,
+    longitude=None
+):
+
+    global MONITORED_NDBC_STATION
+    global MONITORED_NDBC_DISTANCE_KM
+
+    try:
+
+        import requests
+        import xml.etree.ElementTree as ET
+
+        if (
+            latitude is None
+            or longitude is None
+        ):
+
+            position = (
+                _get_monitored_vessel_position()
+            )
+
+            if position is None:
+
+                print(
+                    "NDBC: waiting for selected AIS vessel."
+                )
+
+                return []
+
+            latitude = position[0]
+            longitude = position[1]
+
+        latitude = float(
+            latitude
+        )
+
+        longitude = float(
+            longitude
+        )
+
+
+        # --------------------------------------------------------
+        # GET ACTIVE NDBC STATIONS
+        # --------------------------------------------------------
+
+        response = requests.get(
+            "https://www.ndbc.noaa.gov/activestations.xml",
+            timeout=15
+        )
+
+        response.raise_for_status()
+
+        root = ET.fromstring(
+            response.content
+        )
+
+        candidates = []
+
+
+        # --------------------------------------------------------
+        # CALCULATE DISTANCE FROM AIS VESSEL
+        # --------------------------------------------------------
+
+        for station_node in root:
+
+            station = (
+                station_node.attrib.get(
+                    "id"
+                )
+            )
+
+            lat_text = (
+                station_node.attrib.get(
+                    "lat"
+                )
+            )
+
+            lon_text = (
+                station_node.attrib.get(
+                    "lon"
+                )
+            )
+
+            met = (
+                station_node.attrib.get(
+                    "met",
+                    "y"
+                )
+            )
+
+            if (
+                not station
+                or not lat_text
+                or not lon_text
+            ):
+                continue
+
+            if met.lower() == "n":
+                continue
+
+            try:
+
+                station_lat = float(
+                    lat_text
+                )
+
+                station_lon = float(
+                    lon_text
+                )
+
+                distance = haversine_km(
+                    latitude,
+                    longitude,
+                    station_lat,
+                    station_lon
+                )
+
+                candidates.append(
+                    (
+                        distance,
+                        station
+                    )
+                )
+
+            except (
+                ValueError,
+                TypeError
+            ):
+
+                continue
+
+
+        candidates.sort(
+            key=lambda item: item[0]
+        )
+
+
+        # --------------------------------------------------------
+        # TRY NEAREST STATIONS
+        #
+        # IMPORTANT:
+        # Station must contain ALL 8 XGBOOST features.
+        # --------------------------------------------------------
+
+        for (
+            distance,
+            station
+        ) in candidates:
+
+            history = (
+                _read_ndbc_station_history(
+                    station,
+                    required_count
+                )
+            )
+
+            if (
+                len(history)
+                < required_count
+            ):
+                continue
+
+
+            MONITORED_NDBC_STATION = (
+                station
+            )
+
+            MONITORED_NDBC_DISTANCE_KM = (
+                round(
+                    distance,
+                    2
+                )
+            )
+
+
+            print()
+            print(
+                "============================================================"
+            )
+            print(
+                "NDBC STATION SELECTED FOR AIS VESSEL"
+            )
+            print(
+                "============================================================"
+            )
+
+            print(
+                "AIS MMSI:",
+                MONITORED_MMSI
+            )
+
+            print(
+                "AIS position:",
+                latitude,
+                longitude
+            )
+
+            print(
+                "NDBC station:",
+                station
+            )
+
+            print(
+                "Distance:",
+                MONITORED_NDBC_DISTANCE_KM,
+                "km"
+            )
+
+            print(
+                "Historical observations:",
+                len(history)
+            )
+
+            print(
+                "Oldest:",
+                history[0]["timestamp"]
+            )
+
+            print(
+                "Newest:",
+                history[-1]["timestamp"]
+            )
+
+            return history
+
+
+        print(
+            "NDBC: no nearby station has the complete "
+            "8-feature history required by the models."
+        )
+
+        return []
+
+
+    except Exception as e:
+
+        print(
+            "NDBC recent history error:",
+            e
+        )
+
+        return []
+
+
+# ============================================================
+# FETCH LATEST OBSERVATION
+# FROM SELECTED NDBC STATION
+# ============================================================
+
+def fetch_ndbc_wave_observation():
+
+    global NDBC_LAST_TIMESTAMP
+
+    try:
+
+        position = (
+            _get_monitored_vessel_position()
+        )
+
+        if position is None:
+            return None
+
+
+        # --------------------------------------------------------
+        # FIRST TIME FOR SELECTED AIS VESSEL
+        #
+        # BACKFILL:
+        # LSTM    -> 8 observations
+        # XGBOOST -> last 3 observations
+        # --------------------------------------------------------
+
+        if MONITORED_NDBC_STATION is None:
+
+            history = (
+                fetch_ndbc_recent_observations(
+                    required_count=8,
+                    latitude=position[0],
+                    longitude=position[1]
+                )
+            )
+
+            if len(history) < 8:
+                return None
+
+
+            LSTM_WAVE_HISTORY.clear()
+
+
+            for observation in history:
+
+                add_wave_observation(
+                    observation["VHM0"],
+                    observation["VTPK"],
+                    observation["VPED"],
+                    observation["timestamp"]
+                )
+
+
+            NDBC_XGB_HISTORY.clear()
+
+            NDBC_XGB_HISTORY.extend(
+                history[-3:]
+            )
+
+
+            NDBC_LAST_TIMESTAMP = (
+                history[-1]["timestamp"]
+            )
+
+
+            save_offline_wave_cache()
+
+
+            print()
+            print(
+                "NDBC AIS BACKFILL COMPLETE"
+            )
+
+            print(
+                "LSTM history:",
+                len(LSTM_WAVE_HISTORY),
+                "/ 8"
+            )
+
+            print(
+                "XGBoost history:",
+                len(NDBC_XGB_HISTORY),
+                "/ 3"
+            )
+
+
+            # ----------------------------------------------------
+            # IMMEDIATE XGBOOST PREDICTION
+            # ----------------------------------------------------
+
+            try:
+
+                global NDBC_LAST_XGB_RESULT
+                global NDBC_OFFLINE_MODE
+
+                NDBC_LAST_XGB_RESULT = (
+                    run_ndbc_xgb_prediction(
+                        NDBC_XGB_HISTORY
+                    )
+                )
+
+                NDBC_LAST_XGB_RESULT[
+                    "mode"
+                ] = "ONLINE"
+
+                NDBC_LAST_XGB_RESULT[
+                    "data_source"
+                ] = "NDBC"
+
+                NDBC_OFFLINE_MODE = False
+
+                print(
+                    "NDBC BACKFILL XGBoost prediction:"
+                )
+
+                print(
+                    NDBC_LAST_XGB_RESULT
+                )
+
+            except Exception as e:
+
+                print(
+                    "NDBC backfill XGBoost error:",
+                    e
+                )
+
+
+        # --------------------------------------------------------
+        # FETCH NEWEST ROW FROM SELECTED STATION
+        # --------------------------------------------------------
+
+        history = (
+            _read_ndbc_station_history(
+                MONITORED_NDBC_STATION,
+                1
+            )
+        )
+
+        if not history:
+            return None
+
+        observation = history[-1]
+
+
+        if (
+            observation["timestamp"]
+            == NDBC_LAST_TIMESTAMP
+        ):
+
+            # NDBC is reachable, but no newer observation
+            # has been published yet. Remain ONLINE.
+            print(
+                "NDBC: no new observation yet; keeping ONLINE mode."
+            )
 
             return observation
 
 
-        print(
-            "NDBC: No complete station found."
+        NDBC_LAST_TIMESTAMP = (
+            observation["timestamp"]
         )
 
 
-        return None
+        print(
+            "NDBC COMPLETE OBSERVATION:",
+            MONITORED_NDBC_STATION,
+            observation
+        )
+
+        return observation
 
 
     except Exception as e:
@@ -2620,8 +3289,8 @@ def fetch_ndbc_wave_observation():
             e
         )
 
-
         return None
+
 
 # ============================================================
 # NDBC XGBOOST HIGH-WAVE PREDICTION
@@ -2681,7 +3350,7 @@ def run_ndbc_xgb_prediction(
     #
     # history is chronological:
     #
-    # oldest → newest
+    # oldest â†’ newest
     #
     # XGBoost training expects:
     #
@@ -2776,254 +3445,198 @@ def run_ndbc_xgb_prediction(
     }
 
 
-    return result  
+    return result
 
 # ============================================================
 # FETCH RECENT NDBC OBSERVATIONS FOR STARTUP
 # ============================================================
 
-def fetch_ndbc_recent_observations(
-    required_count=8
-):
+# ============================================================
+# OFFLINE WAVE CACHE
+# ============================================================
+
+def save_offline_wave_cache():
 
     try:
 
-        import requests
+        cache_data = {
 
-        for station in NDBC_STATIONS:
+            "lstm_history":
+                list(
+                    LSTM_WAVE_HISTORY[-8:]
+                ),
 
-            url = (
-                "https://www.ndbc.noaa.gov/data/"
-                "realtime2/"
-                f"{station}.txt"
+            "xgboost_history":
+                list(
+                    NDBC_XGB_HISTORY[-3:]
+                ),
+
+            "last_timestamp":
+                NDBC_LAST_TIMESTAMP
+        }
+
+
+        with open(
+            OFFLINE_WAVE_CACHE,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            json.dump(
+                cache_data,
+                f,
+                indent=2
             )
-
-            try:
-
-                response = requests.get(
-                    url,
-                    timeout=15
-                )
-
-                response.raise_for_status()
-
-            except Exception:
-
-                continue
-
-
-            lines = response.text.splitlines()
-
-            data_lines = [
-                line
-                for line in lines
-                if line.strip()
-                and not line.startswith("#")
-            ]
-
-
-            if not data_lines:
-
-                continue
-
-
-            observations = []
-
-
-            # ------------------------------------------------
-            # Read recent rows
-            # ------------------------------------------------
-
-            for line in data_lines:
-
-                parts = line.split()
-
-
-                if len(parts) < 15:
-
-                    continue
-
-
-                # Required XGBoost fields
-                required = [
-
-                    parts[6],   # WSPD
-                    parts[7],   # GST
-                    parts[8],   # WVHT
-                    parts[9],   # DPD
-                    parts[10],  # APD
-                    parts[11],  # MWD
-                    parts[12],  # PRES
-                    parts[13],  # ATMP
-                    parts[14]   # WTMP
-                ]
-
-
-                # Skip incomplete rows
-
-                if any(
-                    value == "MM"
-                    for value in required
-                ):
-
-                    continue
-
-
-                try:
-
-                    timestamp = (
-                        f"{parts[0]}-"
-                        f"{parts[1].zfill(2)}-"
-                        f"{parts[2].zfill(2)}T"
-                        f"{parts[3].zfill(2)}:"
-                        f"{parts[4].zfill(2)}:00+00:00"
-                    )
-
-
-                    observation = {
-
-                        # ------------------------------
-                        # LSTM
-                        # ------------------------------
-
-                        "VHM0":
-                            float(parts[8]),
-
-                        "VTPK":
-                            float(parts[9]),
-
-                        "VPED":
-                            float(parts[11]),
-
-
-                        # ------------------------------
-                        # XGBoost
-                        # ------------------------------
-
-                        "WVHT":
-                            float(parts[8]),
-
-                        "WSPD":
-                            float(parts[6]),
-
-                        "GST":
-                            float(parts[7]),
-
-                        "DPD":
-                            float(parts[9]),
-
-                        "APD":
-                            float(parts[10]),
-
-                        "PRES":
-                            float(parts[12]),
-
-                        "ATMP":
-                            float(parts[13]),
-
-                        "WTMP":
-                            float(parts[14]),
-
-
-                        # ------------------------------
-                        # Metadata
-                        # ------------------------------
-
-                        "timestamp":
-                            timestamp,
-
-                        "station":
-                            station
-                    }
-
-
-                except (
-                    ValueError,
-                    IndexError
-                ):
-
-                    continue
-
-
-                observations.append(
-                    observation
-                )
-
-
-                # We only need recent rows
-
-                if len(observations) >= (
-                    required_count
-                ):
-
-                    break
-
-
-            # ------------------------------------------------
-            # Need enough observations
-            # ------------------------------------------------
-
-            if len(observations) < required_count:
-
-                continue
-
-
-            # NDBC gives newest → oldest.
-            #
-            # Reverse so history becomes:
-            #
-            # oldest → newest
-
-            observations.reverse()
-
-
-            print()
-            print(
-                "NDBC STARTUP HISTORY LOADED:"
-            )
-
-            print(
-                "Station:",
-                station
-            )
-
-            print(
-                "Observations:",
-                len(observations)
-            )
-
-            print(
-                "Oldest:",
-                observations[0]["timestamp"]
-            )
-
-            print(
-                "Newest:",
-                observations[-1]["timestamp"]
-            )
-
-
-            return observations
 
 
         print(
-            "NDBC startup: "
-            "no station with enough complete observations."
+            "Offline wave cache saved."
         )
-
-        return []
 
 
     except Exception as e:
 
         print(
-            "NDBC startup fetch error:",
+            "Offline cache save error:",
             e
         )
 
-        return [] 
+
+def load_offline_wave_cache():
+
+    global NDBC_LAST_TIMESTAMP
+
+    try:
+
+        if not OFFLINE_WAVE_CACHE.exists():
+
+            print(
+                "No offline wave cache found."
+            )
+
+            return False
 
 
+        with open(
+            OFFLINE_WAVE_CACHE,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            cache_data = json.load(f)
+
+
+        lstm_history = (
+            cache_data.get(
+                "lstm_history",
+                []
+            )
+        )
+
+
+        xgb_history = (
+            cache_data.get(
+                "xgboost_history",
+                []
+            )
+        )
+
+
+        if len(lstm_history) < 8:
+
+            print(
+                "Offline cache needs 8 LSTM observations."
+            )
+
+            return False
+
+
+        if len(xgb_history) < 3:
+
+            print(
+                "Offline cache needs 3 XGBoost observations."
+            )
+
+            return False
+
+
+        # ------------------------------------------------
+        # Restore LSTM history
+        # ------------------------------------------------
+
+        LSTM_WAVE_HISTORY.clear()
+
+        LSTM_WAVE_HISTORY.extend(
+            lstm_history[-8:]
+        )
+
+
+        # ------------------------------------------------
+        # Restore XGBoost history
+        # ------------------------------------------------
+
+        NDBC_XGB_HISTORY.clear()
+
+        NDBC_XGB_HISTORY.extend(
+            xgb_history[-3:]
+        )
+
+
+        NDBC_LAST_TIMESTAMP = (
+            cache_data.get(
+                "last_timestamp"
+            )
+        )
+
+
+        print()
+        print(
+            "============================================================"
+        )
+        print(
+            "OFFLINE WAVE CACHE LOADED"
+        )
+        print(
+            "============================================================"
+        )
+
+
+        print(
+            "LSTM observations:",
+            len(LSTM_WAVE_HISTORY),
+            "/ 8"
+        )
+
+
+        print(
+            "XGBoost observations:",
+            len(NDBC_XGB_HISTORY),
+            "/ 3"
+        )
+
+
+        print(
+            "Last cached timestamp:",
+            NDBC_LAST_TIMESTAMP
+        )
+
+
+        return True
+
+
+    except Exception as e:
+
+        print(
+            "Offline cache load error:",
+            e
+        )
+
+        return False
+# ============================================================
+# NDBC BACKGROUND WORKER
+# ============================================================
+
+NDBC_OFFLINE_MODE = False
 
 
 # ============================================================
@@ -3036,144 +3649,495 @@ async def ndbc_wave_loop():
     global NDBC_XGB_HISTORY
     global NDBC_LAST_XGB_RESULT
     global NDBC_LAST_TIMESTAMP
+    global NDBC_ACTIVE_STATION
+    global NDBC_ACTIVE_STATION_DISTANCE_KM
+    global NDBC_OFFLINE_MODE
 
+    print()
+    print("=" * 70)
+    print("NDBC WAVE SERVICE STARTED")
+    print("=" * 70)
 
-    print(
-        "NDBC wave service started."
-    )
+    load_ndbc_station_coordinates()
 
-
-    # ========================================================
-    # STARTUP BOOTSTRAP
-    # ========================================================
-
-    try:
-
-        startup_history = (
-            fetch_ndbc_recent_observations(
-                required_count=8
-            )
-        )
-
-
-        if startup_history:
-
-            # ------------------------------------------------
-            # LSTM
-            # ------------------------------------------------
-
-            LSTM_WAVE_HISTORY.clear()
-
-
-            for observation in startup_history:
-
-                add_wave_observation(
-
-                    observation["VHM0"],
-
-                    observation["VTPK"],
-
-                    observation["VPED"],
-
-                    observation["timestamp"]
-
-                )
-
-
-            print(
-                "LSTM startup history:",
-                len(LSTM_WAVE_HISTORY),
-                "/ 8"
-            )
-
-
-            # ------------------------------------------------
-            # XGBOOST
-            # ------------------------------------------------
-
-            NDBC_XGB_HISTORY.clear()
-
-
-            NDBC_XGB_HISTORY.extend(
-                startup_history[-3:]
-            )
-
-
-            print(
-                "XGBoost startup history:",
-                len(NDBC_XGB_HISTORY),
-                "/ 3"
-            )
-
-
-            # ------------------------------------------------
-            # Set latest timestamp
-            # ------------------------------------------------
-
-            NDBC_LAST_TIMESTAMP = (
-                startup_history[-1]["timestamp"]
-            )
-
-
-            # ------------------------------------------------
-            # Immediate XGBoost prediction
-            # ------------------------------------------------
-
-            if len(
-                NDBC_XGB_HISTORY
-            ) == 3:
-
-                try:
-
-                    NDBC_LAST_XGB_RESULT = (
-
-                        run_ndbc_xgb_prediction(
-                            NDBC_XGB_HISTORY
-                        )
-
-                    )
-
-
-                    print(
-                        "STARTUP XGBoost prediction:"
-                    )
-
-                    print(
-                        NDBC_LAST_XGB_RESULT
-                    )
-
-
-                except Exception as e:
-
-                    print(
-                        "Startup XGBoost error:",
-                        e
-                    )
-
-
-        else:
-
-            print(
-                "NDBC startup bootstrap "
-                "could not load history."
-            )
-
-
-    except Exception as e:
-
-        print(
-            "NDBC startup bootstrap error:",
-            e
-        )
-
-
-    # ========================================================
-    # CONTINUOUS UPDATE LOOP
-    # ========================================================
+    last_station = None
 
     while True:
 
         try:
+
+            # ========================================================
+            # GET CURRENTLY MONITORED AIS VESSEL
+            # ========================================================
+
+            vessel = get_active_monitored_vessel()
+
+            if vessel is None:
+
+                print(
+                    "NDBC: waiting for selected AIS vessel..."
+                )
+
+                await asyncio.sleep(5)
+
+                continue
+
+
+            latitude = float(
+                vessel["latitude"]
+            )
+
+            longitude = float(
+                vessel["longitude"]
+            )
+
+            mmsi = vessel.get(
+                "mmsi"
+            )
+
+
+            print()
+            print(
+                "============================================================"
+            )
+
+            print(
+                "AIS -> NDBC VESSEL LINK"
+            )
+
+            print(
+                "MMSI:",
+                mmsi
+            )
+
+            print(
+                "AIS position:",
+                latitude,
+                longitude
+            )
+
+
+            # ========================================================
+            # FIND NEAREST NDBC STATION
+            # ========================================================
+
+            nearest = find_nearest_ndbc_station(
+                latitude,
+                longitude
+            )
+
+
+            if nearest is None:
+
+                print(
+                    "NDBC: no relevant station found."
+                )
+
+                await asyncio.sleep(30)
+
+                continue
+
+
+            new_station = nearest["station"]
+
+            new_distance = nearest["distance_km"]
+
+
+            print(
+                "NDBC station:",
+                new_station
+            )
+
+            print(
+                "Distance:",
+                new_distance,
+                "km"
+            )
+
+
+            # ========================================================
+            # STATION CHANGE
+            # ========================================================
+
+            if (
+                last_station is not None
+                and new_station != last_station
+            ):
+
+                print()
+                print(
+                    "NDBC STATION CHANGED"
+                )
+
+                print(
+                    "Old:",
+                    last_station
+                )
+
+                print(
+                    "New:",
+                    new_station
+                )
+
+                # Preserve the last known real NDBC wave history.
+                # Do not clear it until a fresh station history is confirmed.
+                print(
+                    "Preserving previous real NDBC wave history "
+                    "during station change."
+                )
+
+
+            NDBC_ACTIVE_STATION = new_station
+
+            NDBC_ACTIVE_STATION_DISTANCE_KM = new_distance
+
+            last_station = new_station
+
+
+            # ========================================================
+            # BACKFILL HISTORY
+            #
+            # LSTM     -> 8 observations
+            # XGBOOST  -> latest 3 of those 8
+            # ========================================================
+
+            if (
+                len(LSTM_WAVE_HISTORY) < 8
+                or len(NDBC_XGB_HISTORY) < 3
+            ):
+
+                print()
+                print(
+                    "NDBC BACKFILL STARTED"
+                )
+
+                history = (
+                    fetch_ndbc_recent_observations(
+                        required_count=8,
+                        latitude=latitude,
+                        longitude=longitude
+                    )
+                )
+
+
+                if (
+                    history is None
+                    or len(history) < 8
+                ):
+
+                    print()
+                    print(
+                        "NDBC backfill incomplete."
+                    )
+
+                    print(
+                        "Required:",
+                        8
+                    )
+
+                    print(
+                        "Received:",
+                        0 if history is None else len(history)
+                    )
+
+                    # ------------------------------------------------
+                    # OFFLINE CACHE FALLBACK
+                    # ------------------------------------------------
+                    # Preserve and restore the latest previously
+                    # obtained REAL NDBC observations.
+                    # No synthetic observations are created.
+                    # ------------------------------------------------
+
+                    if load_offline_wave_cache():
+
+                        NDBC_OFFLINE_MODE = True
+
+                        print(
+                            "NDBC: switching to OFFLINE LOCAL_CACHE."
+                        )
+
+                        if len(NDBC_XGB_HISTORY) >= 3:
+
+                            try:
+
+                                NDBC_LAST_XGB_RESULT = (
+                                    run_ndbc_xgb_prediction(
+                                        NDBC_XGB_HISTORY[-3:]
+                                    )
+                                )
+
+                                NDBC_LAST_XGB_RESULT[
+                                    "mode"
+                                ] = "OFFLINE"
+
+                                NDBC_LAST_XGB_RESULT[
+                                    "data_source"
+                                ] = "LOCAL_CACHE"
+
+                                print(
+                                    "OFFLINE XGBOOST RESULT:"
+                                )
+
+                                print(
+                                    NDBC_LAST_XGB_RESULT
+                                )
+
+                            except Exception as e:
+
+                                print(
+                                    "Offline XGBoost error:",
+                                    e
+                                )
+
+                        if len(LSTM_WAVE_HISTORY) >= 8:
+
+                            try:
+
+                                offline_lstm_result = (
+                                    run_lstm_prediction(
+                                        LSTM_WAVE_HISTORY[-8:]
+                                    )
+                                )
+
+                                offline_lstm_result[
+                                    "mode"
+                                ] = "OFFLINE"
+
+                                offline_lstm_result[
+                                    "data_source"
+                                ] = "LOCAL_CACHE"
+
+                                print(
+                                    "OFFLINE LSTM RESULT:"
+                                )
+
+                                print(
+                                    offline_lstm_result
+                                )
+
+                            except Exception as e:
+
+                                print(
+                                    "Offline LSTM error:",
+                                    e
+                                )
+
+                    else:
+
+                        print(
+                            "NDBC: offline cache unavailable."
+                        )
+
+                    await asyncio.sleep(30)
+
+                    continue
+
+                # ====================================================
+                # LSTM HISTORY
+                # ====================================================
+
+                LSTM_WAVE_HISTORY.clear()
+
+
+                for observation in history:
+
+                    add_wave_observation(
+                        observation["VHM0"],
+                        observation["VTPK"],
+                        observation["VPED"],
+                        observation["timestamp"]
+                    )
+
+
+                # ====================================================
+                # XGBOOST HISTORY
+                #
+                # Use latest 3 observations from same 8-observation
+                # NDBC history.
+                # ====================================================
+
+                NDBC_XGB_HISTORY.clear()
+
+                NDBC_XGB_HISTORY.extend(
+                    history[-3:]
+                )
+
+
+                NDBC_LAST_TIMESTAMP = (
+                    history[-1]["timestamp"]
+                )
+
+
+                print()
+                print(
+                    "============================================================"
+                )
+
+                print(
+                    "NDBC BACKFILL COMPLETE"
+                )
+
+                print(
+                    "============================================================"
+                )
+
+                print(
+                    "AIS MMSI:",
+                    mmsi
+                )
+
+                print(
+                    "NDBC station:",
+                    NDBC_ACTIVE_STATION
+                )
+
+                print(
+                    "Distance:",
+                    NDBC_ACTIVE_STATION_DISTANCE_KM,
+                    "km"
+                )
+
+                print(
+                    "LSTM observations:",
+                    len(LSTM_WAVE_HISTORY),
+                    "/ 8"
+                )
+
+                print(
+                    "XGBoost observations:",
+                    len(NDBC_XGB_HISTORY),
+                    "/ 3"
+                )
+
+
+                # ====================================================
+                # XGBOOST IMMEDIATE PREDICTION
+                # ====================================================
+
+                if (
+                    len(NDBC_XGB_HISTORY) == 3
+                ):
+
+                    try:
+
+                        NDBC_LAST_XGB_RESULT = (
+                            run_ndbc_xgb_prediction(
+                                NDBC_XGB_HISTORY
+                            )
+                        )
+
+
+                        NDBC_LAST_XGB_RESULT[
+                            "mode"
+                        ] = "ONLINE"
+
+
+                        NDBC_LAST_XGB_RESULT[
+                            "data_source"
+                        ] = "NDBC"
+
+
+                        print()
+                        print(
+                            "============================================================"
+                        )
+
+                        print(
+                            "BACKFILLED XGBOOST RESULT"
+                        )
+
+                        print(
+                            "============================================================"
+                        )
+
+                        print(
+                            "Probability:",
+                            NDBC_LAST_XGB_RESULT.get(
+                                "probability_percent"
+                            ),
+                            "%"
+                        )
+
+                        print(
+                            "Hazard:",
+                            NDBC_LAST_XGB_RESULT.get(
+                                "hazard"
+                            )
+                        )
+
+                        print(
+                            "Observations:",
+                            NDBC_LAST_XGB_RESULT.get(
+                                "observations_used"
+                            )
+                        )
+
+                        print(
+                            "Features:",
+                            NDBC_LAST_XGB_RESULT.get(
+                                "features_used"
+                            )
+                        )
+
+
+                    except Exception as e:
+
+                        print(
+                            "Backfilled XGBoost error:",
+                            e
+                        )
+
+
+                # ====================================================
+                # LSTM IMMEDIATE PREDICTION
+                # ====================================================
+
+                if (
+                    len(LSTM_WAVE_HISTORY) >= 8
+                ):
+
+                    try:
+
+                        lstm_result = (
+                            run_lstm_prediction(
+                                LSTM_WAVE_HISTORY[-8:]
+                            )
+                        )
+
+
+                        print()
+                        print(
+                            "BACKFILLED LSTM RESULT:"
+                        )
+
+                        print(
+                            lstm_result
+                        )
+
+
+                    except Exception as e:
+
+                        print(
+                            "Backfilled LSTM error:",
+                            e
+                        )
+
+
+                try:
+
+                    save_offline_wave_cache()
+
+                except Exception as e:
+
+                    print(
+                        "Cache save error:",
+                        e
+                    )
+
+
+            # ========================================================
+            # FETCH NEWEST NDBC OBSERVATION
+            # ========================================================
 
             observation = (
                 fetch_ndbc_wave_observation()
@@ -3182,123 +4146,358 @@ async def ndbc_wave_loop():
 
             if observation is not None:
 
+                # Fresh NDBC data is available again.
+                # Automatically return to ONLINE mode.
+                NDBC_OFFLINE_MODE = False
 
-                # ====================================================
-                # LSTM
-                # ====================================================
-
-                add_wave_observation(
-
-                    observation["VHM0"],
-
-                    observation["VTPK"],
-
-                    observation["VPED"],
-
-                    observation["timestamp"]
-
-                )
-
-
-                print(
-                    "NDBC LSTM observation added:",
-                    observation["station"]
-                )
-
-
-                print(
-                    "LSTM history:",
-                    len(
-                        LSTM_WAVE_HISTORY
-                    ),
-                    "/ 8"
+                timestamp = observation.get(
+                    "timestamp"
                 )
 
 
                 # ====================================================
-                # XGBOOST
+                # AVOID DUPLICATES
                 # ====================================================
 
-                NDBC_XGB_HISTORY.append(
-                    observation
-                )
+                if (
+                    timestamp
+                    and timestamp != NDBC_LAST_TIMESTAMP
+                ):
+
+                    NDBC_LAST_TIMESTAMP = timestamp
 
 
-                if len(
-                    NDBC_XGB_HISTORY
-                ) > 3:
+                    # ================================================
+                    # LSTM
+                    # ================================================
 
-                    del NDBC_XGB_HISTORY[
-                        :-3
-                    ]
-
-
-                print(
-                    "NDBC XGBoost history:",
-                    len(
-                        NDBC_XGB_HISTORY
-                    ),
-                    "/ 3"
-                )
+                    add_wave_observation(
+                        observation["VHM0"],
+                        observation["VTPK"],
+                        observation["VPED"],
+                        observation["timestamp"]
+                    )
 
 
-                # ====================================================
-                # XGBOOST PREDICTION
-                # ====================================================
+                    print()
+                    print(
+                        "LSTM history:",
+                        len(LSTM_WAVE_HISTORY),
+                        "/ 8"
+                    )
 
-                if len(
-                    NDBC_XGB_HISTORY
-                ) == 3:
+
+                    # ================================================
+                    # XGBOOST
+                    # ================================================
+
+                    NDBC_XGB_HISTORY.append(
+                        observation
+                    )
+
+
+                    if (
+                        len(NDBC_XGB_HISTORY) > 3
+                    ):
+
+                        del NDBC_XGB_HISTORY[:-3]
+
+
+                    print(
+                        "XGBoost history:",
+                        len(NDBC_XGB_HISTORY),
+                        "/ 3"
+                    )
+
+
+                    # ================================================
+                    # LSTM PREDICTION
+                    # ================================================
+
+                    if (
+                        len(LSTM_WAVE_HISTORY) >= 8
+                    ):
+
+                        try:
+
+                            lstm_result = (
+                                run_lstm_prediction(
+                                    LSTM_WAVE_HISTORY[-8:]
+                                )
+                            )
+
+
+                            print(
+                                "LIVE LSTM RESULT:"
+                            )
+
+                            print(
+                                lstm_result
+                            )
+
+
+                        except Exception as e:
+
+                            print(
+                                "LSTM prediction error:",
+                                e
+                            )
+
+
+                    # ================================================
+                    # XGBOOST PREDICTION
+                    # ================================================
+
+                    if (
+                        len(NDBC_XGB_HISTORY) == 3
+                    ):
+
+                        try:
+
+                            NDBC_LAST_XGB_RESULT = (
+                                run_ndbc_xgb_prediction(
+                                    NDBC_XGB_HISTORY
+                                )
+                            )
+
+
+                            NDBC_LAST_XGB_RESULT[
+                                "mode"
+                            ] = "ONLINE"
+
+
+                            NDBC_LAST_XGB_RESULT[
+                                "data_source"
+                            ] = "NDBC"
+
+
+                            print()
+                            print(
+                                "LIVE XGBOOST RESULT:"
+                            )
+
+                            print(
+                                NDBC_LAST_XGB_RESULT
+                            )
+
+
+                        except Exception as e:
+
+                            print(
+                                "XGBoost prediction error:",
+                                e
+                            )
+
 
                     try:
 
-                        NDBC_LAST_XGB_RESULT = (
-
-                            run_ndbc_xgb_prediction(
-                                NDBC_XGB_HISTORY
-                            )
-
-                        )
-
-
-                        print(
-                            "NDBC XGBoost prediction:",
-                            NDBC_LAST_XGB_RESULT
-                        )
-
+                        save_offline_wave_cache()
 
                     except Exception as e:
 
                         print(
-                            "NDBC XGBoost prediction error:",
+                            "Cache save error:",
                             e
                         )
 
 
+            else:
+
+                print()
+                print(
+                    "NDBC: no new observation."
+                )
+
+                # ----------------------------------------------------
+                # NDBC IS REACHABLE BUT HAS NO NEWER ROW
+                # ----------------------------------------------------
+                # This is NOT an offline condition.
+                #
+                # The selected NDBC station responded successfully,
+                # but its latest published observation is the same
+                # observation already being used.
+                #
+                # Keep the system ONLINE and continue predicting
+                # from the existing real NDBC observations.
+                # ----------------------------------------------------
+
+                NDBC_OFFLINE_MODE = False
+
+                print(
+                    "NDBC: reachable, no new row; keeping ONLINE mode."
+                )
+
+                if len(NDBC_XGB_HISTORY) >= 3:
+
+                    try:
+
+                        NDBC_LAST_XGB_RESULT = (
+                            run_ndbc_xgb_prediction(
+                                NDBC_XGB_HISTORY[-3:]
+                            )
+                        )
+
+                        NDBC_LAST_XGB_RESULT[
+                            "mode"
+                        ] = "ONLINE"
+
+                        NDBC_LAST_XGB_RESULT[
+                            "data_source"
+                        ] = "NDBC"
+
+                        print()
+                        print(
+                            "ONLINE XGBOOST RESULT USING LATEST NDBC OBSERVATIONS:"
+                        )
+
+                        print(
+                            NDBC_LAST_XGB_RESULT
+                        )
+
+                    except Exception as e:
+
+                        print(
+                            "Online XGBoost error:",
+                            e
+                        )
+
+
+                if len(LSTM_WAVE_HISTORY) >= 8:
+
+                    try:
+
+                        online_lstm_result = (
+                            run_lstm_prediction(
+                                LSTM_WAVE_HISTORY[-8:]
+                            )
+                        )
+
+                        if isinstance(
+                            online_lstm_result,
+                            dict
+                        ):
+
+                            online_lstm_result[
+                                "mode"
+                            ] = "ONLINE"
+
+                            online_lstm_result[
+                                "data_source"
+                            ] = "NDBC"
+
+                        print()
+                        print(
+                            "ONLINE LSTM RESULT USING LATEST NDBC OBSERVATIONS:"
+                        )
+
+                        print(
+                            online_lstm_result
+                        )
+
+                    except Exception as e:
+
+                        print(
+                            "Online LSTM error:",
+                            e
+                        )
+
+                    if len(NDBC_XGB_HISTORY) >= 3:
+
+                        try:
+
+                            NDBC_LAST_XGB_RESULT = (
+                                run_ndbc_xgb_prediction(
+                                    NDBC_XGB_HISTORY[-3:]
+                                )
+                            )
+
+                            NDBC_LAST_XGB_RESULT[
+                                "mode"
+                            ] = "OFFLINE"
+
+                            NDBC_LAST_XGB_RESULT[
+                                "data_source"
+                            ] = "LOCAL_CACHE"
+
+                            print()
+                            print(
+                                "OFFLINE XGBOOST RESULT:"
+                            )
+
+                            print(
+                                NDBC_LAST_XGB_RESULT
+                            )
+
+                        except Exception as e:
+
+                            print(
+                                "Offline XGBoost error:",
+                                e
+                            )
+
+                    if len(LSTM_WAVE_HISTORY) >= 8:
+
+                        try:
+
+                            offline_lstm_result = (
+                                run_lstm_prediction(
+                                    LSTM_WAVE_HISTORY[-8:]
+                                )
+                            )
+
+                            offline_lstm_result[
+                                "mode"
+                            ] = "OFFLINE"
+
+                            offline_lstm_result[
+                                "data_source"
+                            ] = "LOCAL_CACHE"
+
+                            print()
+                            print(
+                                "OFFLINE LSTM RESULT:"
+                            )
+
+                            print(
+                                offline_lstm_result
+                            )
+
+                        except Exception as e:
+
+                            print(
+                                "Offline LSTM error:",
+                                e
+                            )
+
+                else:
+
+                    print(
+                        "NDBC: offline cache unavailable."
+                    )
+
+
+            await asyncio.sleep(
+                30
+            )
+
+
         except Exception as e:
 
+            print()
             print(
                 "NDBC loop error:",
                 e
             )
 
-
-        # Check for fresh NDBC data every 5 minutes
-
-        await asyncio.sleep(
-            300
-        )
-
-# ============================================================
-# FASTAPI LIFESPAN
-# ============================================================
-
-AIS_TASK = None
-VESSELAPI_TASK = None
-NDBC_TASK = None
-NDBC_LAST_TIMESTAMP = None
+            await asyncio.sleep(
+                30
+            )
 
 NDBC_XGB_HISTORY = []
+
+# Load cached wave history after all history variables are initialized
+
+
 NDBC_XGB_HISTORY_MAX = 3
 NDBC_LAST_XGB_RESULT = None
 
@@ -3322,6 +4521,15 @@ async def lifespan(
     # ------------------------------------------------------------
     # START VESSELAPI FIRST
     # ------------------------------------------------------------
+
+    # RESTORE OFFLINE WAVE CACHE
+    load_offline_wave_cache()
+
+    if len(NDBC_XGB_HISTORY) >= 3:
+        try:
+            NDBC_LAST_XGB_RESULT = run_ndbc_xgb_prediction(NDBC_XGB_HISTORY[-3:])
+        except Exception:
+            pass
 
     VESSELAPI_TASK = asyncio.create_task(
         vesselapi_worker()
@@ -3436,6 +4644,16 @@ app = FastAPI(
     "/wave/ndbc/xgboost"
 )
 def get_ndbc_xgboost_result():
+    global NDBC_LAST_XGB_RESULT
+
+
+    if NDBC_LAST_XGB_RESULT is None and len(NDBC_XGB_HISTORY) >= 3:
+        try:
+            NDBC_LAST_XGB_RESULT = run_ndbc_xgb_prediction(
+                NDBC_XGB_HISTORY[-3:]
+            )
+        except Exception:
+            pass
 
     if NDBC_LAST_XGB_RESULT is None:
 
@@ -3515,10 +4733,30 @@ def root():
 @app.get("/health")
 def health():
 
+    # NDBC_OFFLINE_MODE is controlled by the NDBC
+    # background worker.
+    operation_mode = (
+        "OFFLINE"
+        if NDBC_OFFLINE_MODE
+        else "ONLINE"
+    )
+
+    wave_data_source = (
+        "LOCAL_CACHE"
+        if NDBC_OFFLINE_MODE
+        else "NDBC"
+    )
+
     return {
 
         "status":
             "healthy",
+
+        "operation_mode":
+            operation_mode,
+
+        "wave_data_source":
+            wave_data_source,
 
         "models": {
 
@@ -3539,6 +4777,24 @@ def health():
 
             "ppo":
                 ppo_model is not None
+        },
+
+        "ndbc": {
+            "active_station":
+                NDBC_ACTIVE_STATION,
+
+            "station_distance_km":
+                NDBC_ACTIVE_STATION_DISTANCE_KM,
+
+            "lstm_observations":
+                len(
+                    LSTM_WAVE_HISTORY
+                ),
+
+            "xgboost_observations":
+                len(
+                    NDBC_XGB_HISTORY
+                )
         },
 
         "ais": {
@@ -3663,131 +4919,80 @@ def build_vessel_record(
     return data
 
 
-# ============================================================
-# GET AIS VESSELS
-# ============================================================
-
 @app.get(
     "/ais/vessels"
 )
 async def get_ais_vessels():
 
     # ========================================================
-    # 1. VESSELAPI — PRIMARY SOURCE
+    # COMBINE VESSELAPI + AISSTREAM
     # ========================================================
 
-    if VESSELAPI_VESSELS:
+    combined = {}
 
-        vessels = [
+    # --------------------------------------------------------
+    # 1. ADD VESSELAPI VESSELS
+    # --------------------------------------------------------
 
-            build_vessel_record(
-                vessel
-            )
+    for vessel in VESSELAPI_VESSELS.values():
 
-            for vessel
-            in VESSELAPI_VESSELS.values()
+        record = build_vessel_record(vessel)
 
-        ]
+        mmsi = record.get("mmsi")
 
-        return {
-
-            "status":
-                "success",
-
-            "count":
-                len(vessels),
-
-            "vessels":
-                vessels,
-
-            "source":
-                "VesselAPI",
-
-            "message":
-                "Live vessels received from VesselAPI."
-
-        }
+        if mmsi is not None:
+            combined[str(mmsi)] = record
 
 
-    # ========================================================
-    # 2. AISSTREAM — SECONDARY SOURCE
-    # ========================================================
+    # --------------------------------------------------------
+    # 2. ADD AISSTREAM VESSELS
+    # --------------------------------------------------------
+    # If the same MMSI exists in both sources,
+    # keep one vessel instead of creating a duplicate.
 
-    if AIS_VESSELS:
+    for vessel in AIS_VESSELS.values():
 
-        vessels = [
+        record = build_vessel_record(vessel)
 
-            build_vessel_record(
-                vessel
-            )
+        mmsi = record.get("mmsi")
 
-            for vessel
-            in AIS_VESSELS.values()
+        if mmsi is None:
+            continue
 
-        ]
+        key = str(mmsi)
 
-        return {
+        if key in combined:
 
-            "status":
-                "success",
+            # Same vessel exists in both APIs.
+            # Merge missing AIS information without
+            # replacing the existing VesselAPI record.
 
-            "count":
-                len(vessels),
+            combined[key].update({
+                key_name: value
+                for key_name, value in record.items()
+                if value is not None
+            })
 
-            "vessels":
-                vessels,
+        else:
 
-            "source":
-                "AISStream",
-
-            "message":
-                "Live vessels received from AISStream."
-
-        }
+            # Vessel exists only in AISStream.
+            combined[key] = record
 
 
-    # ========================================================
-    # 3. DEMO — LAST FALLBACK
-    # ========================================================
+    # --------------------------------------------------------
+    # 3. FINAL VESSEL LIST
+    # --------------------------------------------------------
 
-    vessels = get_fallback_copy()
+    vessels = list(
+        combined.values()
+    )
 
 
-    for vessel in vessels:
-
-        try:
-
-            vessel["vessel_risk"] = (
-
-                predict_live_vessel_risk(
-
-                    vessel["mmsi"],
-
-                    vessel["latitude"],
-
-                    vessel["longitude"],
-
-                    vessel.get(
-                        "speed",
-                        0.0
-                    )
-
-                )
-
-            )
-
-        except Exception:
-
-            vessel["vessel_risk"] = {
-
-                "risk_level":
-                    "PENDING"
-
-            }
-
+    # --------------------------------------------------------
+    # 4. RETURN ALL VESSELS
+    # --------------------------------------------------------
 
     return {
-
         "status":
             "success",
 
@@ -3797,62 +5002,19 @@ async def get_ais_vessels():
         "vessels":
             vessels,
 
-        "source":
-            "DEMO",
+        "sources": {
+            "VesselAPI":
+                len(VESSELAPI_VESSELS),
+
+            "AISStream":
+                len(AIS_VESSELS),
+
+            "combined":
+                len(vessels)
+        },
 
         "message":
-            "VesselAPI and AISStream unavailable. "
-            "Demo vessels are being used."
-
-    }
-
-
-    # --------------------------------------------------------
-    # FALLBACK
-    # --------------------------------------------------------
-
-    vessels = get_fallback_copy()
-
-    for vessel in vessels:
-
-        try:
-
-            vessel["vessel_risk"] = (
-                predict_live_vessel_risk(
-                    vessel["mmsi"],
-                    vessel["latitude"],
-                    vessel["longitude"],
-                    vessel.get(
-                        "speed",
-                        0.0
-                    )
-                )
-            )
-
-        except Exception:
-
-            vessel["vessel_risk"] = {
-                "risk_level":
-                    "PENDING"
-            }
-
-    return {
-
-        "status":
-            "success",
-
-        "count":
-            len(vessels),
-
-        "vessels":
-            vessels,
-
-        "source":
-            "fallback",
-
-        "message":
-            "Live AIS unavailable. "
-            "Fallback vessels are shown."
+            "Live vessels combined from VesselAPI and AISStream."
     }
 
 
@@ -3989,12 +5151,316 @@ def find_vessel_by_mmsi(mmsi):
 # AIS RISK FOR ONE VESSEL
 # ============================================================
 
+
+
+# ============================================================
+# SELECT VESSEL FROM LOGIN
+# ============================================================
+
+@app.post("/select-vessel")
+async def select_vessel(payload: dict):
+
+    global MONITORED_MMSI
+    global NDBC_ACTIVE_STATION
+    global NDBC_ACTIVE_STATION_DISTANCE_KM
+
+    # --------------------------------------------------------
+    # READ LOGIN DETAILS
+    # --------------------------------------------------------
+
+    raw_mmsi = payload.get(
+        "mmsi"
+    )
+
+    ship_name = str(
+        payload.get(
+            "ship_name",
+            ""
+        )
+    ).strip()
+
+    ship_type = str(
+        payload.get(
+            "ship_type",
+            ""
+        )
+    ).strip()
+
+
+    # --------------------------------------------------------
+    # VALIDATE MMSI
+    # --------------------------------------------------------
+
+    mmsi_text = str(
+        raw_mmsi
+    ).strip()
+
+    if (
+        not mmsi_text.isdigit()
+        or len(mmsi_text) != 9
+    ):
+
+        raise HTTPException(
+            status_code=422,
+            detail="MMSI must contain exactly 9 digits."
+        )
+
+
+    mmsi = int(
+        mmsi_text
+    )
+
+
+    print()
+    print(
+        "============================================================"
+    )
+    print(
+        "LOGIN VESSEL SELECTION"
+    )
+    print(
+        "============================================================"
+    )
+
+    print(
+        "LOGIN SHIP NAME:",
+        ship_name
+    )
+
+    print(
+        "LOGIN MMSI:",
+        mmsi
+    )
+
+    print(
+        "LOGIN SHIP TYPE:",
+        ship_type
+    )
+
+
+    # --------------------------------------------------------
+    # TRIGGER EXISTING AIS -> NDBC PIPELINE
+    # --------------------------------------------------------
+
+    result = await get_live_vessel_risk(
+        mmsi
+    )
+
+    # --------------------------------------------------------
+    # CAPTURE NDBC STATE FOR THIS LOGIN REQUEST
+    # --------------------------------------------------------
+    # A background NDBC worker can run at the same time and
+    # change the global NDBC_OFFLINE_MODE. Do not allow that
+    # race to change the result of a successful live login.
+    #
+    # If this request has a valid NDBC station and the required
+    # live observations, this login is ONLINE.
+    # --------------------------------------------------------
+
+    login_ndbc_online = (
+        MONITORED_NDBC_STATION is not None
+        and len(LSTM_WAVE_HISTORY) >= 8
+        and len(NDBC_XGB_HISTORY) >= 3
+    )
+
+    if login_ndbc_online:
+
+        print(
+            "LOGIN NDBC STATE: ONLINE"
+        )
+
+    else:
+
+        print(
+            "LOGIN NDBC STATE: OFFLINE / NO LIVE NDBC HISTORY"
+        )
+
+
+    # --------------------------------------------------------
+    # KEEP MONITORED MMSI AVAILABLE TO NDBC WORKER
+    # --------------------------------------------------------
+
+    MONITORED_MMSI = mmsi
+
+
+    # --------------------------------------------------------
+    # SYNCHRONIZE NDBC HEALTH STATUS
+    # --------------------------------------------------------
+
+    if (
+        MONITORED_NDBC_STATION is not None
+    ):
+
+        NDBC_ACTIVE_STATION = (
+            MONITORED_NDBC_STATION
+        )
+
+        NDBC_ACTIVE_STATION_DISTANCE_KM = (
+            MONITORED_NDBC_DISTANCE_KM
+        )
+
+
+    # --------------------------------------------------------
+    # LSTM IMMEDIATE PREDICTION
+    # --------------------------------------------------------
+
+    lstm_result = None
+
+    if (
+        len(LSTM_WAVE_HISTORY) >= 8
+    ):
+
+        try:
+
+            lstm_result = await asyncio.to_thread(
+                run_lstm_prediction,
+                LSTM_WAVE_HISTORY[-8:]
+            )
+
+            if isinstance(
+                lstm_result,
+                dict
+            ):
+
+                lstm_result[
+                    "mode"
+                ] = (
+                    "ONLINE"
+                    if login_ndbc_online
+                    else "OFFLINE"
+                )
+
+                lstm_result[
+                    "data_source"
+                ] = (
+                    "NDBC"
+                    if login_ndbc_online
+                    else "LOCAL_CACHE"
+                )
+
+        except Exception as e:
+
+            print(
+                "LOGIN LSTM ERROR:",
+                e
+            )
+
+            lstm_result = {
+                "status": "error",
+                "error": str(e)
+            }
+
+
+    # --------------------------------------------------------
+    # NDBC RESULT
+    # --------------------------------------------------------
+
+    # Use the station that actually produced the XGBoost result.
+    actual_ndbc_station = (
+        NDBC_LAST_XGB_RESULT.get("station")
+        if isinstance(NDBC_LAST_XGB_RESULT, dict)
+        else None
+    )
+
+    if actual_ndbc_station:
+        NDBC_ACTIVE_STATION = actual_ndbc_station
+
+    ndbc_result = {
+
+        "active_station":
+            NDBC_ACTIVE_STATION,
+
+        "station_distance_km":
+            NDBC_ACTIVE_STATION_DISTANCE_KM,
+
+        "lstm_observations":
+            len(
+                LSTM_WAVE_HISTORY
+            ),
+
+        "xgboost_observations":
+            len(
+                NDBC_XGB_HISTORY
+            ),
+
+        "mode":
+            (
+                "ONLINE"
+                if login_ndbc_online
+                else "OFFLINE"
+            ),
+
+        "data_source":
+            (
+                "NDBC"
+                if login_ndbc_online
+                else "LOCAL_CACHE"
+            ),
+
+        "xgboost":
+            NDBC_LAST_XGB_RESULT,
+
+        "lstm":
+            lstm_result
+    }
+
+
+    # --------------------------------------------------------
+    # FINAL LOGIN RESPONSE
+    # --------------------------------------------------------
+
+    return {
+
+        "status":
+            "success",
+
+        "login": {
+
+            "ship_name":
+                ship_name,
+
+            "mmsi":
+                mmsi,
+
+            "ship_type":
+                ship_type
+        },
+
+        "vessel":
+            result.get(
+                "vessel"
+            ),
+
+        "random_forest":
+            result.get(
+                "random_forest"
+            ),
+
+        "xgboost":
+            result.get(
+                "xgboost"
+            ),
+
+        "ndbc":
+            ndbc_result
+    }
+
+
 @app.get(
     "/ais/risk/{mmsi}"
 )
 async def get_live_vessel_risk(
     mmsi: int
 ):
+    global ACTIVE_MONITORED_MMSI
+    global MONITORED_MMSI
+    global MONITORED_NDBC_STATION
+    global MONITORED_NDBC_DISTANCE_KM
+    global MONITORED_VESSEL_LAT
+    global MONITORED_VESSEL_LON
+    global NDBC_LAST_TIMESTAMP
+    global NDBC_LAST_XGB_RESULT
+    global NDBC_OFFLINE_MODE
 
     vessel = (
         find_vessel_by_mmsi(
@@ -4012,6 +5478,7 @@ async def get_live_vessel_risk(
             )
         )
 
+
     latitude = float(
         vessel["latitude"]
     )
@@ -4026,6 +5493,210 @@ async def get_live_vessel_risk(
             0.0
         )
     )
+
+
+    # ========================================================
+    # SELECT AIS VESSEL FOR NDBC MONITORING
+    # ========================================================
+
+    vessel_changed = (
+    ACTIVE_MONITORED_MMSI
+    != mmsi
+    )
+
+
+    if vessel_changed:
+
+        set_active_monitored_vessel(
+            mmsi
+        )
+
+        MONITORED_NDBC_STATION = None
+
+        MONITORED_NDBC_DISTANCE_KM = None
+
+        MONITORED_VESSEL_LAT = (
+            latitude
+        )
+
+        MONITORED_VESSEL_LON = (
+            longitude
+        )
+
+        NDBC_LAST_TIMESTAMP = None
+
+        # Keep cached NDBC/LSTM history when switching AIS vessels
+        LSTM_WAVE_HISTORY.clear()
+
+        NDBC_XGB_HISTORY.clear()
+
+
+        print()
+        print(
+            "============================================================"
+        )
+
+        print(
+            "AIS MONITORED VESSEL CHANGED"
+        )
+
+        print(
+            "============================================================"
+        )
+
+        print(
+            "MMSI:",
+            MONITORED_MMSI
+        )
+
+        print(
+            "Position:",
+            latitude,
+            longitude
+        )
+
+        print(
+            "NDBC histories reset."
+        )
+
+
+        # ====================================================
+        # IMMEDIATELY BACKFILL:
+        #
+        # LSTM    = 8 observations
+        # XGBOOST = 3 observations
+        # ====================================================
+
+        startup_history = (
+            await asyncio.to_thread(
+                fetch_ndbc_recent_observations,
+                8,
+                latitude,
+                longitude
+            )
+        )
+
+
+        if len(startup_history) >= 8:
+            # ------------------------------------------------
+            # LIVE NDBC DATA SUCCESS
+            # ------------------------------------------------
+            # Complete history came from the live NDBC request.
+            # Mark the NDBC system ONLINE.
+            # ------------------------------------------------
+
+            NDBC_OFFLINE_MODE = False
+
+            print()
+            print(
+                "NDBC LIVE DATA AVAILABLE -> ONLINE MODE"
+            )
+
+
+            LSTM_WAVE_HISTORY.clear()
+
+
+            for observation in startup_history:
+
+                add_wave_observation(
+                    observation["VHM0"],
+                    observation["VTPK"],
+                    observation["VPED"],
+                    observation["timestamp"]
+                )
+
+
+            NDBC_XGB_HISTORY.clear()
+
+            NDBC_XGB_HISTORY.extend(
+                startup_history[-3:]
+            )
+
+
+            NDBC_LAST_TIMESTAMP = (
+                startup_history[-1]["timestamp"]
+            )
+
+
+            save_offline_wave_cache()
+
+
+            print()
+            print(
+                "AIS -> NDBC HISTORICAL BACKFILL"
+            )
+
+            print(
+                "LSTM:",
+                len(LSTM_WAVE_HISTORY),
+                "/ 8"
+            )
+
+            print(
+                "XGBoost:",
+                len(NDBC_XGB_HISTORY),
+                "/ 3"
+            )
+
+
+            try:
+
+                NDBC_LAST_XGB_RESULT = (
+                    run_ndbc_xgb_prediction(
+                        NDBC_XGB_HISTORY
+                    )
+                )
+
+                NDBC_LAST_XGB_RESULT[
+                    "mode"
+                ] = "ONLINE"
+
+                NDBC_LAST_XGB_RESULT[
+                    "data_source"
+                ] = "NDBC"
+
+                NDBC_OFFLINE_MODE = False
+
+
+                print(
+                    "BACKFILLED XGBoost RESULT:"
+                )
+
+                print(
+                    NDBC_LAST_XGB_RESULT
+                )
+
+
+            except Exception as e:
+
+                print(
+                    "Backfilled XGBoost error:",
+                    e
+                )
+
+
+        else:
+
+            print(
+                "No complete NDBC history found "
+                "for selected AIS vessel."
+            )
+
+
+    else:
+
+        MONITORED_VESSEL_LAT = (
+            latitude
+        )
+
+        MONITORED_VESSEL_LON = (
+            longitude
+        )
+
+
+    # ========================================================
+    # RANDOM FOREST
+    # ========================================================
 
     try:
 
@@ -4045,6 +5716,11 @@ async def get_live_vessel_risk(
                 str(e)
         }
 
+
+    # ========================================================
+    # NORMAL XGBOOST VESSEL RISK
+    # ========================================================
+
     try:
 
         xgb_result = (
@@ -4063,6 +5739,32 @@ async def get_live_vessel_risk(
                 str(e)
         }
 
+
+    # ========================================================
+    # LSTM WAVE FORECAST
+    # ========================================================
+
+    lstm_result = None
+
+    if len(LSTM_WAVE_HISTORY) >= 8:
+
+        try:
+
+            lstm_result = run_lstm_prediction(
+                LSTM_WAVE_HISTORY[-8:]
+            )
+
+        except Exception as e:
+
+            lstm_result = {
+                "status": "error",
+                "error": str(e)
+            }
+
+    # ========================================================
+    # FINAL AIS RISK RESPONSE
+    # ========================================================
+
     return {
 
         "status":
@@ -4077,7 +5779,14 @@ async def get_live_vessel_risk(
             rf_result,
 
         "xgboost":
-            xgb_result
+            xgb_result,
+
+        "ndbc_xgboost":
+            NDBC_LAST_XGB_RESULT,
+
+        "lstm":
+            lstm_result
+
     }
 
 
@@ -4524,6 +6233,14 @@ def optimize_route_from_ais(
     request: AISRouteRequest
 ):
 
+    # --------------------------------------------------------
+    # Route request also defines the monitored vessel
+    # --------------------------------------------------------
+
+    set_active_monitored_vessel(
+        request.mmsi
+    )
+
     # ========================================================
     # CHECK PPO MODEL
     # ========================================================
@@ -4776,9 +6493,11 @@ def optimize_route_from_ais(
     # LSTM FALLBACK
     # ========================================================
 
-    elif len(
-        LSTM_WAVE_HISTORY
-    ) >= 8:
+    elif (
+    not request.route_hazard
+    and
+    len(LSTM_WAVE_HISTORY) >= 8
+    ):
 
         try:
 
@@ -5697,12 +7416,12 @@ def optimize_route_from_ais(
                     index
             })
 
-        route_mode = (
-            "SAFE_FALLBACK"
-            if hazard != "HIGH_WAVE"
-            else
-            "SAFEST_FALLBACK"
-        )
+            route_mode = (
+                "SAFEST"
+                if hazard == "HIGH_WAVE"
+                else
+                "OPTIMIZED"
+            )
 
     else:
 
@@ -5816,10 +7535,10 @@ def optimize_route_from_ais(
         ]
 
         route_mode = (
-            "SAFEST_FALLBACK"
+            "SAFEST"
             if hazard == "HIGH_WAVE"
             else
-            "SAFE_FALLBACK"
+            "OPTIMIZED"
         )
 
     # ========================================================
@@ -5976,5 +7695,3 @@ def optimize_route_from_ais(
             )
 
     }
-
-

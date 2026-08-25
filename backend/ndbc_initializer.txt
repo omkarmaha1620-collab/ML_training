@@ -1,0 +1,265 @@
+# ============================================================
+# IMMEDIATE NDBC INITIALIZATION FOR ACTIVE AIS VESSEL
+# ============================================================
+
+def initialize_ndbc_for_active_vessel(
+    latitude,
+    longitude
+):
+
+    global NDBC_LAST_TIMESTAMP
+    global NDBC_LAST_XGB_RESULT
+    global NDBC_OFFLINE_MODE
+    global NDBC_ACTIVE_STATION
+    global NDBC_ACTIVE_STATION_DISTANCE_KM
+
+    print()
+    print("============================================================")
+    print("IMMEDIATE NDBC INITIALIZATION")
+    print("============================================================")
+    print("AIS MMSI:", ACTIVE_MONITORED_MMSI)
+    print("AIS position:", latitude, longitude)
+    print("Required LSTM observations: 8")
+    print("Required XGBoost observations: 3")
+    print("============================================================")
+
+    # --------------------------------------------------------
+    # TRY ONLINE NDBC FIRST
+    # --------------------------------------------------------
+
+    try:
+
+        history = fetch_ndbc_recent_observations(
+            required_count=8,
+            latitude=latitude,
+            longitude=longitude
+        )
+
+        if history and len(history) >= 8:
+
+            # ------------------------------------------------
+            # LSTM HISTORY
+            # ------------------------------------------------
+
+            LSTM_WAVE_HISTORY.clear()
+
+            for observation in history:
+
+                add_wave_observation(
+                    observation["VHM0"],
+                    observation["VTPK"],
+                    observation["VPED"],
+                    observation["timestamp"]
+                )
+
+            # ------------------------------------------------
+            # XGBOOST HISTORY
+            # ------------------------------------------------
+
+            NDBC_XGB_HISTORY.clear()
+
+            NDBC_XGB_HISTORY.extend(
+                history[-3:]
+            )
+
+            # ------------------------------------------------
+            # TIMESTAMP
+            # ------------------------------------------------
+
+            NDBC_LAST_TIMESTAMP = (
+                history[-1]["timestamp"]
+            )
+
+            NDBC_OFFLINE_MODE = False
+
+            # ------------------------------------------------
+            # IMMEDIATE XGBOOST PREDICTION
+            # ------------------------------------------------
+
+            try:
+
+                NDBC_LAST_XGB_RESULT = (
+                    run_ndbc_xgb_prediction(
+                        NDBC_XGB_HISTORY
+                    )
+                )
+
+                NDBC_LAST_XGB_RESULT["mode"] = "ONLINE"
+                NDBC_LAST_XGB_RESULT["data_source"] = "NDBC"
+
+                print()
+                print(
+                    "IMMEDIATE NDBC XGBoost PREDICTION:"
+                )
+
+                print(
+                    NDBC_LAST_XGB_RESULT
+                )
+
+            except Exception as e:
+
+                print(
+                    "Immediate NDBC XGBoost error:",
+                    e
+                )
+
+            # ------------------------------------------------
+            # SAVE CACHE
+            # ------------------------------------------------
+
+            try:
+
+                save_offline_wave_cache()
+
+            except Exception as e:
+
+                print(
+                    "NDBC cache save error:",
+                    e
+                )
+
+            print()
+            print("============================================================")
+            print("NDBC INITIALIZATION SUCCESS")
+            print("============================================================")
+            print(
+                "Station:",
+                NDBC_ACTIVE_STATION
+            )
+            print(
+                "Distance:",
+                NDBC_ACTIVE_STATION_DISTANCE_KM,
+                "km"
+            )
+            print(
+                "LSTM observations:",
+                len(LSTM_WAVE_HISTORY),
+                "/ 8"
+            )
+            print(
+                "XGBoost observations:",
+                len(NDBC_XGB_HISTORY),
+                "/ 3"
+            )
+            print(
+                "Latest:",
+                NDBC_LAST_TIMESTAMP
+            )
+            print("============================================================")
+
+            return True
+
+    except Exception as e:
+
+        print()
+        print(
+            "ONLINE NDBC INITIALIZATION FAILED:",
+            e
+        )
+
+    # --------------------------------------------------------
+    # OFFLINE CACHE FALLBACK
+    # --------------------------------------------------------
+
+    print()
+    print("TRYING OFFLINE NDBC CACHE...")
+
+    try:
+
+        cache_loaded = load_offline_wave_cache()
+
+        if cache_loaded:
+
+            # ------------------------------------------------
+            # RECOVER STATION FROM CACHED HISTORY
+            # ------------------------------------------------
+
+            if (
+                NDBC_XGB_HISTORY
+                and
+                NDBC_XGB_HISTORY[-1].get("station")
+            ):
+
+                NDBC_ACTIVE_STATION = (
+                    NDBC_XGB_HISTORY[-1]["station"]
+                )
+
+            elif (
+                LSTM_WAVE_HISTORY
+                and
+                LSTM_WAVE_HISTORY[-1].get("station")
+            ):
+
+                NDBC_ACTIVE_STATION = (
+                    LSTM_WAVE_HISTORY[-1]["station"]
+                )
+
+            # ------------------------------------------------
+            # MARK OFFLINE
+            # ------------------------------------------------
+
+            NDBC_OFFLINE_MODE = True
+
+            print()
+            print("============================================================")
+            print("OFFLINE NDBC CACHE ACTIVE")
+            print("============================================================")
+            print(
+                "Station:",
+                NDBC_ACTIVE_STATION
+            )
+            print(
+                "LSTM observations:",
+                len(LSTM_WAVE_HISTORY),
+                "/ 8"
+            )
+            print(
+                "XGBoost observations:",
+                len(NDBC_XGB_HISTORY),
+                "/ 3"
+            )
+            print("============================================================")
+
+            # ------------------------------------------------
+            # RE-RUN XGBOOST FROM CACHE
+            # ------------------------------------------------
+
+            if len(NDBC_XGB_HISTORY) >= 3:
+
+                try:
+
+                    NDBC_LAST_XGB_RESULT = (
+                        run_ndbc_xgb_prediction(
+                            NDBC_XGB_HISTORY[-3:]
+                        )
+                    )
+
+                    NDBC_LAST_XGB_RESULT["mode"] = "OFFLINE"
+                    NDBC_LAST_XGB_RESULT["data_source"] = "CACHE"
+
+                except Exception as e:
+
+                    print(
+                        "Offline XGBoost error:",
+                        e
+                    )
+
+            return (
+                len(LSTM_WAVE_HISTORY) >= 8
+                and
+                len(NDBC_XGB_HISTORY) >= 3
+            )
+
+    except Exception as e:
+
+        print(
+            "OFFLINE NDBC CACHE FAILED:",
+            e
+        )
+
+    print()
+    print("NDBC INITIALIZATION FAILED")
+    print("No usable online history and no usable cache.")
+    print()
+
+    return False

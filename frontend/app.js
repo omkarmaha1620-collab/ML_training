@@ -1,5 +1,5 @@
 // ============================================================
-// SHIP DETAILS → MONITORING
+// SHIP DETAILS â†’ MONITORING
 // ============================================================
 
 let shipProfile = {
@@ -48,7 +48,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     startButton.addEventListener(
         "click",
-        () => {
+        async () => {
 
             const shipName =
                 document.getElementById(
@@ -136,6 +136,34 @@ document.addEventListener("DOMContentLoaded", () => {
                 )
             );
 
+            // ------------------------------------------------
+            // SAVE SELECTED MANUAL VESSEL FOR MONITORING PAGE
+            // ------------------------------------------------
+
+            sessionStorage.setItem(
+                "marineShipProfile",
+                JSON.stringify(
+                    shipProfile
+                )
+            );
+
+            sessionStorage.setItem(
+                "marineCurrentVessel",
+                JSON.stringify({
+                    mmsi: shipProfile.mmsi,
+                    name: shipProfile.shipName,
+                    ship_name: shipProfile.shipName,
+                    ship_type: shipProfile.shipType,
+                    latitude: null,
+                    longitude: null
+                })
+            );
+
+            console.log(
+                "MANUAL AIS VESSEL SELECTED:",
+                shipProfile.mmsi
+            );
+
 
             // ------------------------------------------------
             // UPDATE MONITORING SCREEN
@@ -180,6 +208,109 @@ document.addEventListener("DOMContentLoaded", () => {
 
             }
 
+
+            // ------------------------------------------------
+            // START BACKEND AIS -> NDBC PIPELINE
+            // ------------------------------------------------
+
+            try {
+
+                console.log(
+                    "SELECTING LOGIN VESSEL:",
+                    shipProfile
+                );
+
+                const response =
+                    await fetch(
+                        `${API_BASE}/select-vessel`,
+                        {
+                            method: "POST",
+
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+
+                            body:
+                                JSON.stringify({
+                                    mmsi:
+                                        shipProfile.mmsi,
+
+                                    ship_name:
+                                        shipProfile.shipName,
+
+                                    ship_type:
+                                        shipProfile.shipType
+                                })
+                        }
+                    );
+
+
+                const data =
+                    await response.json();
+
+
+                if (!response.ok) {
+
+                    throw new Error(
+                        data.detail ||
+                        "Backend could not find this vessel."
+                    );
+                }
+
+
+                console.log(
+                    "AIS -> NDBC RESULT:",
+                    data
+                );
+
+
+                // Save backend-selected AIS vessel
+                if (
+                    data.vessel
+                ) {
+
+                    sessionStorage.setItem(
+                        "marineCurrentVessel",
+                        JSON.stringify(
+                            data.vessel
+                        )
+                    );
+                }
+
+
+                // Save NDBC result
+                sessionStorage.setItem(
+                    "marineNDBCResult",
+                    JSON.stringify(
+                        data.ndbc ||
+                        {}
+                    )
+                );
+
+
+                console.log(
+                    "AIS -> NDBC PIPELINE COMPLETE"
+                );
+
+
+            } catch (error) {
+
+                console.error(
+                    "AIS -> NDBC SELECTION FAILED:",
+                    error
+                );
+
+                shipDetailsError.textContent =
+                    error.message ||
+                    "Unable to find this vessel.";
+
+                shipDetailsError.classList.remove(
+                    "hidden"
+                );
+
+                return;
+            }
 
             // ------------------------------------------------
             // HIDE ERROR
@@ -645,42 +776,152 @@ async function loadVessels() {
         }
 
         // ----------------------------------------------------
-        // Automatically select first vessel
+        // SELECT THE EXACT MMSI ENTERED ON LOGIN
         // ----------------------------------------------------
 
+        const manualMmsi =
+            String(
+                shipProfile?.mmsi ||
+                ""
+            ).trim();
+
         if (
-            !state.selected &&
+            manualMmsi &&
             state.vessels.length > 0
         ) {
 
-            const first =
-                state.vessels[0];
+            const matchedVessel =
+                state.vessels.find(
+                    vessel =>
+                        String(
+                            vessel.mmsi
+                        ).trim() ===
+                        manualMmsi
+                );
 
-            let firstMarker =
-                null;
+            if (matchedVessel) {
 
-            state.vesselLayer.eachLayer(
-                layer => {
+                let matchedMarker =
+                    null;
 
-                    if (
-                        !firstMarker &&
-                        typeof layer.getLatLng ===
-                            "function"
-                    ) {
+                state.vesselLayer.eachLayer(
+                    layer => {
 
-                        firstMarker =
-                            layer;
+                        if (
+                            !matchedMarker &&
+                            typeof layer.getLatLng ===
+                                "function"
+                        ) {
+
+                            const latLng =
+                                layer.getLatLng();
+
+                            if (
+                                Math.abs(
+                                    latLng.lat -
+                                    matchedVessel.lat
+                                ) < 0.0001 &&
+                                Math.abs(
+                                    latLng.lng -
+                                    matchedVessel.lon
+                                ) < 0.0001
+                            ) {
+
+                                matchedMarker =
+                                    layer;
+                            }
+                        }
                     }
-                }
+                );
+
+                state.selected =
+                    matchedVessel;
+
+                state.selectedMarker =
+                    matchedMarker;
+
+                // ------------------------------------------------
+                // SAVE LIVE AIS DETAILS FOR MONITORING PAGE
+                // ------------------------------------------------
+
+                const monitoringVessel = {
+
+                    ...matchedVessel,
+
+                    shipName:
+                        shipProfile.shipName,
+
+                    ship_name:
+                        shipProfile.shipName,
+
+                    shipType:
+                        shipProfile.shipType,
+
+                    ship_type:
+                        shipProfile.shipType
+                };
+
+                sessionStorage.setItem(
+                    "marineCurrentVessel",
+                    JSON.stringify(
+                        monitoringVessel
+                    )
+                );
+
+                sessionStorage.setItem(
+                    "marineVesselDetails",
+                    JSON.stringify(
+                        shipProfile
+                    )
+                );
+
+                renderDetails(
+                    matchedVessel
+                );
+
+                console.log(
+                    "EXACT LOGIN MMSI MATCHED:",
+                    matchedVessel.mmsi
+                );
+
+                console.log(
+                    "LIVE AIS POSITION:",
+                    matchedVessel.lat,
+                    matchedVessel.lon
+                );
+
+                console.log(
+                    "MONITORING VESSEL SAVED:",
+                    monitoringVessel
+                );
+
+            }
+            else {
+
+                console.warn(
+                    "LOGIN MMSI NOT CURRENTLY FOUND IN LIVE AIS:",
+                    manualMmsi
+                );
+
+                state.selected =
+                    null;
+
+                state.selectedMarker =
+                    null;
+            }
+
+        }
+        else {
+
+            console.warn(
+                "No manual MMSI available for AIS matching."
             );
 
-            if (firstMarker) {
+            state.selected =
+                null;
 
-                selectVessel(
-                    first,
-                    firstMarker
-                );
-            }
+            state.selectedMarker =
+                null;
         }
 
     } catch (error) {
@@ -794,7 +1035,7 @@ function renderVessels() {
                                 vessel.name
                             )}"
                         >
-                            🚢
+                            ðŸš¢
                         </div>
                         `,
 
@@ -990,7 +1231,7 @@ function renderDetails(
     if ($("detailCourse")) {
 
         $("detailCourse").textContent =
-            `${vessel.course.toFixed(0)}°`;
+            `${vessel.course.toFixed(0)}Â°`;
     }
 
     if ($("shoreDistance")) {
@@ -1210,20 +1451,20 @@ async function optimizeRoute() {
         if ($("routeStatus")) {
 
             $("routeStatus").textContent =
-                `PPO optimized ocean route displayed • ` +
+                `PPO optimized ocean route displayed â€¢ ` +
                 `Action ${
                     ppo.action ?? "--"
-                } • Turn ${
+                } â€¢ Turn ${
                     Number(
                         ppo.turnAngle ?? 0
                     ).toFixed(0)
-                }°`;
+                }Â°`;
         }
 
         if ($("routePanelStatus")) {
 
             $("routePanelStatus").textContent =
-                `Ocean route active → ${
+                `Ocean route active â†’ ${
                     destLat.toFixed(4)
                 }, ${
                     destLon.toFixed(4)
@@ -1857,13 +2098,13 @@ function drawAnimatedRoute(
             );
 
         $("routePanelStatus").textContent =
-            `${oceanText} • PPO route active • ${
+            `${oceanText} â€¢ PPO route active â€¢ ${
                 route.distanceKm.toFixed(1)
-            } km • MODE: ${
+            } km â€¢ MODE: ${
                 routeMode
-            } • HAZARD: ${
+            } â€¢ HAZARD: ${
                 hazard
-            } • WAVE: ${
+            } â€¢ WAVE: ${
                 waveStatus
             }`;
     }

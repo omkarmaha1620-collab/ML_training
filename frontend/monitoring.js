@@ -34,6 +34,7 @@ let allVessels = [];
 let monitoringTimer = null;
 
 let healthTimer = null;
+let OPERATION_MODE = "ONLINE";
 
 let lstmTimer = null;
 
@@ -190,7 +191,6 @@ function updateProgress(
     id,
     value
 ) {
-
     const progress =
         document.getElementById(id);
 
@@ -198,33 +198,30 @@ function updateProgress(
         return;
     }
 
+    let numeric = Number(value);
 
-    let numeric =
-        Number(value);
-
-
-    if (
-        !Number.isFinite(
-            numeric
-        )
-    ) {
-
+    if (!Number.isFinite(numeric)) {
         numeric = 0;
     }
 
+    numeric = Math.max(
+        0,
+        Math.min(100, numeric)
+    );
 
-    numeric =
-        Math.max(
-            0,
-            Math.min(
-                100,
-                numeric
-            )
-        );
+    // Hide negligible probabilities.
+// If displayed probability is effectively 0%, show no bar.
+if (numeric < 0.1) {
+    progress.style.width = "0%";
+    progress.style.minWidth = "0";
+} else {
+    progress.style.minWidth = "0";
+    progress.style.width = `${numeric}%`;
+}
 
-
-    progress.style.width =
-        `${numeric}%`;
+    console.log(
+        `PROGRESS ${id}: ${numeric}%`
+    );
 }
 
 
@@ -331,7 +328,7 @@ function updateConnectionStatus(
     if (connected) {
 
         status.textContent =
-            `AIS LIVE • ${vesselCount} VESSELS`;
+            `AIS LIVE â€¢ ${vesselCount} VESSELS`;
 
 
         status.classList.remove(
@@ -618,13 +615,13 @@ function setMonitoringWaiting() {
 
     setText(
         "liveCourse",
-        "--°"
+        "--Â°"
     );
 
 
     setText(
         "liveHeading",
-        "--°"
+        "--Â°"
     );
 
 
@@ -723,13 +720,13 @@ function setMonitoringUnavailable() {
 
     setText(
         "liveCourse",
-        "--°"
+        "--Â°"
     );
 
 
     setText(
         "liveHeading",
-        "--°"
+        "--Â°"
     );
 
 
@@ -973,8 +970,8 @@ function updateVesselDisplay(
         Number.isFinite(
             course
         )
-            ? `${course.toFixed(1)}°`
-            : "--°"
+            ? `${course.toFixed(1)}Â°`
+            : "--Â°"
     );
 
 
@@ -983,8 +980,8 @@ function updateVesselDisplay(
         Number.isFinite(
             heading
         )
-            ? `${heading.toFixed(1)}°`
-            : "--°"
+            ? `${heading.toFixed(1)}Â°`
+            : "--Â°"
     );
 
 
@@ -1094,6 +1091,36 @@ function updateOverallRisk(
     level,
     probability
 ) {
+        // ------------------------------------------------
+    // OFFLINE MODE
+    // ------------------------------------------------
+
+    if (
+        OPERATION_MODE === "OFFLINE"
+    ) {
+
+        const riskLevel =
+            document.getElementById(
+                "overallRisk"
+            );
+
+        if (riskLevel) {
+
+            // Random Forest / overall vessel risk
+            // is unavailable in OFFLINE mode.
+            riskLevel.textContent = "OFFLINE MODE";
+            riskLevel.style.display = "";
+
+            riskLevel.classList.remove(
+                "low",
+                "medium",
+                "high",
+                "safe"
+            );
+        }
+
+        return;
+    }
 
     let normalized =
         String(
@@ -2318,6 +2345,10 @@ function updateAIResults(
         }
 
 
+                // ------------------------------------------------
+        // RANDOM FOREST OFFLINE / ONLINE STATUS
+        // ------------------------------------------------
+
         updateOverallRisk(
             level,
             probability
@@ -2776,7 +2807,7 @@ async function loadMonitoringData() {
         ) {
 
             safetyMessage.textContent =
-                `LIVE AIS TRACKING ACTIVE — ${vessel.ship_name}`;
+                `LIVE AIS TRACKING ACTIVE â€” ${vessel.ship_name}`;
         }
 
 
@@ -2877,12 +2908,8 @@ async function checkBackendHealth() {
             await fetch(
                 `${API_BASE}/health?t=${Date.now()}`,
                 {
-                    method:
-                        "GET",
-
-                    cache:
-                        "no-store",
-
+                    method: "GET",
+                    cache: "no-store",
                     headers: {
                         "Accept":
                             "application/json"
@@ -2891,20 +2918,103 @@ async function checkBackendHealth() {
             );
 
 
-        if (
-            !response.ok
-        ) {
+        if (!response.ok) {
 
             throw new Error(
-                `Health HTTP ` +
-                `${response.status}`
+                `Health HTTP ${response.status}`
             );
         }
 
 
         const data =
             await response.json();
+        OPERATION_MODE =
+    String(
+        data.operation_mode ?? "ONLINE"
+    ).toUpperCase();
+    // ------------------------------------------------
+// UPDATE RANDOM FOREST OFFLINE STATUS
+// ------------------------------------------------
 
+if (
+    OPERATION_MODE === "OFFLINE"
+) {
+
+    const riskLevel =
+        document.getElementById(
+            "riskLevel"
+        );
+
+    if (riskLevel) {
+
+        riskLevel.textContent =
+            "OFFLINE MODE";
+
+        riskLevel.classList.remove(
+            "low",
+            "medium",
+            "high",
+            "safe"
+        );
+    }
+
+    console.log(
+        "RANDOM FOREST: OFFLINE MODE"
+    );
+}
+
+console.log(
+    "OPERATION MODE:",
+    OPERATION_MODE
+);
+
+
+// ------------------------------------------------
+// ------------------------------------------------
+// UPDATE RANDOM FOREST OFFLINE STATUS IMMEDIATELY
+// ------------------------------------------------
+
+const riskLevel =
+    document.getElementById(
+        "riskLevel"
+    );
+
+if (riskLevel) {
+
+    if (
+        OPERATION_MODE === "OFFLINE"
+    ) {
+
+        // Hide Random Forest completely offline.
+        riskLevel.textContent = "";
+        riskLevel.style.display = "none";
+
+        riskLevel.classList.remove(
+            "low",
+            "medium",
+            "high",
+            "safe"
+        );
+
+        console.log(
+            "RANDOM FOREST: CONTENT HIDDEN IN OFFLINE MODE"
+        );
+
+    } else {
+
+        // Show Random Forest normally online.
+        riskLevel.style.display = "";
+
+        if (
+            currentVessel
+        ) {
+
+            updateAIResults(
+                currentVessel
+            );
+        }
+    }
+}
 
         console.log(
             "BACKEND HEALTH:",
@@ -2912,30 +3022,91 @@ async function checkBackendHealth() {
         );
 
 
+        // ====================================================
+        // DETERMINE ONLINE / OFFLINE ML MODE
+        // ====================================================
+
+        const isOffline =
+            data.operation_mode === "OFFLINE" ||
+            data.wave_data_source === "LOCAL_CACHE";
+
+
+        window.marineOfflineMode =
+            isOffline;
+
+
+        // ====================================================
+        // BACKEND STATUS
+        // ====================================================
+
         const backendStatus =
             document.getElementById(
                 "backendStatus"
             );
 
 
-        if (
-            backendStatus
-        ) {
+        if (backendStatus) {
 
             backendStatus.textContent =
-                "BACKEND ONLINE";
+                isOffline
+                    ? "BACKEND ONLINE â€¢ OFFLINE ML"
+                    : "BACKEND ONLINE";
 
 
             backendStatus.classList.remove(
-                "offline"
+                "offline",
+                "online"
             );
 
 
             backendStatus.classList.add(
-                "online"
+                isOffline
+                    ? "offline"
+                    : "online"
             );
         }
 
+
+        // ====================================================
+        // ROUTE BUTTON
+        // ====================================================
+
+        const routeBtn =
+            document.getElementById(
+                "routeButton"
+            );
+
+
+        if (routeBtn) {
+
+            if (isOffline) {
+
+                routeBtn.disabled = true;
+
+                routeBtn.classList.add(
+                    "offline-disabled"
+                );
+
+                routeBtn.title =
+                    "Route optimization requires internet connectivity.";
+
+            } else {
+
+                routeBtn.disabled = false;
+
+                routeBtn.classList.remove(
+                    "offline-disabled"
+                );
+
+                routeBtn.title =
+                    "Open route optimization";
+            }
+        }
+
+
+        // ====================================================
+        // VESSEL COUNT
+        // ====================================================
 
         if (
             data.ais &&
@@ -2954,14 +3125,25 @@ async function checkBackendHealth() {
         }
 
 
-    } catch (
-        error
-    ) {
+        // ====================================================
+        // OFFLINE ML STATUS
+        // ====================================================
+
+        updateOfflineMLStatus(
+            isOffline
+        );
+
+
+    } catch (error) {
 
         console.warn(
             "BACKEND HEALTH CHECK FAILED:",
             error
         );
+
+
+        window.marineOfflineMode =
+            true;
 
 
         const backendStatus =
@@ -2970,9 +3152,7 @@ async function checkBackendHealth() {
             );
 
 
-        if (
-            backendStatus
-        ) {
+        if (backendStatus) {
 
             backendStatus.textContent =
                 "BACKEND OFFLINE";
@@ -2987,7 +3167,77 @@ async function checkBackendHealth() {
                 "offline"
             );
         }
+
+
+        const routeBtn =
+            document.getElementById(
+                "routeButton"
+            );
+
+
+        if (routeBtn) {
+
+            routeBtn.disabled = true;
+
+            routeBtn.classList.add(
+                "offline-disabled"
+            );
+
+            routeBtn.title =
+                "Route optimization unavailable offline.";
+        }
+
+
+        updateOfflineMLStatus(
+            true
+        );
     }
+}
+
+
+// ============================================================
+// OFFLINE ML STATUS
+// ============================================================
+
+function updateOfflineMLStatus(isOffline) {
+
+    const statusElements =
+        document.querySelectorAll(
+            "[data-ml-status]"
+        );
+
+
+    statusElements.forEach(
+        function(element) {
+
+            if (isOffline) {
+
+                element.textContent =
+                    "OFFLINE MODE";
+
+                element.classList.add(
+                    "offline"
+                );
+
+                element.classList.remove(
+                    "online"
+                );
+
+            } else {
+
+                element.textContent =
+                    "ONLINE";
+
+                element.classList.add(
+                    "online"
+                );
+
+                element.classList.remove(
+                    "offline"
+                );
+            }
+        }
+    );
 }
 
 
@@ -3011,6 +3261,18 @@ function setupRouteButton() {
     routeBtn.addEventListener(
         "click",
         function() {
+
+            if (
+                window.marineOfflineMode
+            ) {
+
+                alert(
+                    "Route optimization is unavailable in offline mode.\n\n" +
+                    "Reconnect to the internet to use live vessel routing."
+                );
+
+                return;
+            }
 
             if (
                 !currentVessel
