@@ -1,19 +1,19 @@
-/* ============================================================
+﻿/* ============================================================
    AI MARINE MONITORING
    SAFE ROUTE OPTIMIZATION
 
    FLOW:
 
    VesselAPI
-       ↓
+       “
    Selected live vessel
-       ↓
+       “
    Current vessel position
-       ↓
+       “
    XGBoost / hazard information
-       ↓
+       “
    PPO route optimization
-       ↓
+       “
    Safe / safest route
 ============================================================ */
 
@@ -99,6 +99,7 @@ let latestRisk = null;
 let latestStorm = null;
 
 let latestLSTM = null;
+let routeHazard = "NORMAL";
 
 
 /* ============================================================
@@ -162,16 +163,23 @@ async function loadVesselPosition() {
     try {
 
         const response =
-            await fetch(
-                `${API_BASE}/ais/vessels?t=${Date.now()}`,
-                {
-                    method: "GET",
-                    cache: "no-store"
-                }
-            );
+                    await fetch(
+                        `${API_BASE}/ais/vessels?t=${Date.now()}`,
+                        {
+
+                            method:
+                                "GET",
+
+                            headers:
+                                {
+                                "Accept":
+                                    "application/json"
+                                }
+                        }
+                    );
 
 
-        if (!response.ok) {
+                if (!response.ok) {
 
             throw new Error(
                 `AIS request failed: ${response.status}`
@@ -422,16 +430,23 @@ async function loadVesselRisk() {
     try {
 
         const response =
-            await fetch(
-                `${API_BASE}/ais/risk/${encodeURIComponent(vesselData.mmsi)}?t=${Date.now()}`,
-                {
-                    method: "GET",
-                    cache: "no-store"
-                }
-            );
+                    await fetch(
+                        `${API_BASE}/ais/risk/${encodeURIComponent(vesselData.mmsi)}?t=${Date.now()}`,
+                        {
+
+                            method:
+                                "GET",
+
+                            headers:
+                                {
+                                "Accept":
+                                    "application/json"
+                                }
+                        }
+                    );
 
 
-        if (!response.ok) {
+                if (!response.ok) {
 
             console.warn(
                 "AI risk endpoint returned:",
@@ -688,8 +703,8 @@ const vesselIcon =
                     box-shadow:0 0 18px rgba(24,200,237,.7);
                     font-size:17px;
                 ">
-                    🚢
-                </div>
+                    
+                &#128674;</div>
                 `,
 
             iconSize:
@@ -1010,16 +1025,23 @@ async function loadNDBCData() {
     try {
 
         const response =
-            await fetch(
-                `${API_BASE}/health?t=${Date.now()}`,
-                {
-                    cache:
-                        "no-store"
-                }
-            );
+                    await fetch(
+                        `${API_BASE}/health?t=${Date.now()}`,
+                        {
+
+                            method:
+                                "GET",
+
+                            headers:
+                                {
+                                "Accept":
+                                    "application/json"
+                                }
+                        }
+                    );
 
 
-        if (!response.ok) {
+                if (!response.ok) {
 
             return null;
 
@@ -1224,8 +1246,7 @@ if (optimizeBtn) {
                  * Determine current hazard.
                  * ------------------------------------------------
                  */
-
-                const routeHazard =
+                routeHazard =
                     getRouteHazard();
 
 
@@ -1305,13 +1326,8 @@ if (optimizeBtn) {
                                             Number(
                                                 destLon
                                             ),
-
-                                        route_hazard:
-                                            routeHazard
-
                                     }
                                 )
-
                         }
                     );
 
@@ -2056,7 +2072,7 @@ function showRouteResult(
         ) {
 
             riskElement.textContent =
-                "HIGH HAZARD → SAFEST ROUTE";
+                "HIGH HAZARD  SAFEST ROUTE";
 
         } else if (
             hazard.includes(
@@ -2071,12 +2087,12 @@ function showRouteResult(
         ) {
 
             riskElement.textContent =
-                "HAZARD DETECTED → SAFE ROUTE";
+                "HAZARD DETECTED  SAFE ROUTE";
 
         } else {
 
             riskElement.textContent =
-                "LOW / NORMAL → OPTIMIZED ROUTE";
+                "LOW / NORMAL  OPTIMIZED ROUTE";
 
         }
 
@@ -2497,3 +2513,12 @@ initializeRoutePage()
 
         }
     );
+
+
+
+
+
+
+
+
+

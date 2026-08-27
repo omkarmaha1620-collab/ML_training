@@ -7,6 +7,7 @@ from pathlib import Path
 import os
 import json
 import math
+import heapq
 import httpx
 import asyncio
 from datetime import datetime, timezone
@@ -2631,13 +2632,17 @@ NDBC_STATIONS = [
     "46015",
     "46022",
     "46025",
-    "46026",
+    "46026",    
     "46028",
     "46041",
     "46042",
 ]
 
 NDBC_LAST_TIMESTAMP = None
+
+# True when the last NDBC request succeeded.
+# False when the NDBC request failed due to connectivity/access error.
+NDBC_LAST_FETCH_OK = True
 
 
 
@@ -3117,8 +3122,10 @@ def fetch_ndbc_recent_observations(
 def fetch_ndbc_wave_observation():
 
     global NDBC_LAST_TIMESTAMP
+    global NDBC_LAST_FETCH_OK
 
     try:
+        NDBC_LAST_FETCH_OK = True
 
         position = (
             _get_monitored_vessel_position()
@@ -3284,6 +3291,8 @@ def fetch_ndbc_wave_observation():
 
     except Exception as e:
 
+        NDBC_LAST_FETCH_OK = False
+
         print(
             "NDBC fetch error:",
             e
@@ -3350,7 +3359,7 @@ def run_ndbc_xgb_prediction(
     #
     # history is chronological:
     #
-    # oldest â†’ newest
+    # oldest Ã¢â€ â€™ newest
     #
     # XGBoost training expects:
     #
@@ -4321,10 +4330,20 @@ async def ndbc_wave_loop():
                 # from the existing real NDBC observations.
                 # ----------------------------------------------------
 
-                NDBC_OFFLINE_MODE = False
+                if NDBC_LAST_FETCH_OK:
+
+                    NDBC_OFFLINE_MODE = False
+
+                    print(
+                        "NDBC: reachable, no new row; keeping ONLINE mode."
+                    )
+
+                else:
+
+                    NDBC_OFFLINE_MODE = True
 
                 print(
-                    "NDBC: reachable, no new row; keeping ONLINE mode."
+                    "NDBC: NDBC request failed; switching to OFFLINE LOCAL_CACHE."
                 )
 
                 if len(NDBC_XGB_HISTORY) >= 3:
@@ -7042,284 +7061,1212 @@ def optimize_route_from_ais(
     # waypoints.
     # ========================================================
 
-    def create_safe_fallback_route():
 
-        print(
-            "Creating ocean-safe fallback route..."
-        )
+    # ========================================================
+    # GLOBAL OCEAN ROUTER
+    #
+    # Direct route is used only when it is ocean-safe.
+    # If land blocks the direct route, A* searches through
+    # ocean cells and creates a multi-turn safe route.
+    # ========================================================
 
-        # ----------------------------------------------------
-        # Candidate intermediate waypoint offsets
-        # ----------------------------------------------------
+    def create_global_ocean_route(
+        start_lat,
+        start_lon,
+        goal_lat,
+        goal_lon,
+        grid_step=0.10
+    ):
 
-        mid_lat = (
-            current_lat +
-            destination_lat
-        ) / 2.0
+        print()
+        print("=" * 70)
+        print("GLOBAL OCEAN ROUTER STARTED")
+        print("=" * 70)
 
-        mid_lon = (
-            current_lon +
-            destination_lon
-        ) / 2.0
+        start_lat = float(start_lat)
+        start_lon = float(start_lon)
+        goal_lat = float(goal_lat)
+        goal_lon = float(goal_lon)
 
-        offset_values = [
+        # ========================================================
+        # ENDPOINT VALIDATION
+        # ========================================================
 
-            0.0,
+        if point_is_land(
+            start_lat,
+            start_lon
+        ):
 
-            0.15,
-            -0.15,
-
-            0.30,
-            -0.30,
-
-            0.50,
-            -0.50,
-
-            0.75,
-            -0.75,
-
-            1.00,
-            -1.00
-
-        ]
-
-        candidates = []
-
-        # ----------------------------------------------------
-        # Direct route
-        # ----------------------------------------------------
-
-        candidates.append(
-            [
-                (
-                    current_lat,
-                    current_lon
-                ),
-
-                (
-                    destination_lat,
-                    destination_lon
-                )
-            ]
-        )
-
-        # ----------------------------------------------------
-        # Latitude detours
-        # ----------------------------------------------------
-
-        for offset in offset_values:
-
-            candidates.append(
-
-                [
-
-                    (
-                        current_lat,
-                        current_lon
-                    ),
-
-                    (
-                        mid_lat + offset,
-                        mid_lon
-                    ),
-
-                    (
-                        destination_lat,
-                        destination_lon
-                    )
-
-                ]
-
+            print(
+                "GLOBAL ROUTER: vessel is on land."
             )
-
-        # ----------------------------------------------------
-        # Longitude detours
-        # ----------------------------------------------------
-
-        for offset in offset_values:
-
-            candidates.append(
-
-                [
-
-                    (
-                        current_lat,
-                        current_lon
-                    ),
-
-                    (
-                        mid_lat,
-                        mid_lon + offset
-                    ),
-
-                    (
-                        destination_lat,
-                        destination_lon
-                    )
-
-                ]
-
-            )
-
-        # ----------------------------------------------------
-        # Two-waypoint detours
-        # ----------------------------------------------------
-
-        for offset in [
-
-            0.30,
-            -0.30,
-            0.50,
-            -0.50,
-            0.75,
-            -0.75
-
-        ]:
-
-            candidates.append(
-
-                [
-
-                    (
-                        current_lat,
-                        current_lon
-                    ),
-
-                    (
-                        current_lat + offset,
-                        current_lon + offset
-                    ),
-
-                    (
-                        destination_lat - offset,
-                        destination_lon + offset
-                    ),
-
-                    (
-                        destination_lat,
-                        destination_lon
-                    )
-
-                ]
-
-            )
-
-        # ====================================================
-        # VALIDATE CANDIDATES
-        # ====================================================
-
-        valid_routes = []
-
-        for candidate in candidates:
-
-            try:
-
-                # --------------------------------------------
-                # Point validation
-                # --------------------------------------------
-
-                invalid_point = False
-
-                for lat, lon in candidate:
-
-                    if point_is_land(
-                        lat,
-                        lon
-                    ):
-
-                        invalid_point = True
-
-                        break
-
-                if invalid_point:
-
-                    continue
-
-                # --------------------------------------------
-                # Segment validation
-                # --------------------------------------------
-
-                invalid_segment = False
-
-                for i in range(
-                    len(candidate) - 1
-                ):
-
-                    lat1, lon1 = (
-                        candidate[i]
-                    )
-
-                    lat2, lon2 = (
-                        candidate[i + 1]
-                    )
-
-                    if segment_crosses_land(
-
-                        lat1,
-                        lon1,
-
-                        lat2,
-                        lon2
-
-                    ):
-
-                        invalid_segment = True
-
-                        break
-
-                if invalid_segment:
-
-                    continue
-
-                # --------------------------------------------
-                # Route is safe
-                # --------------------------------------------
-
-                distance = 0.0
-
-                for i in range(
-                    len(candidate) - 1
-                ):
-
-                    distance += (
-                        haversine_km(
-
-                            candidate[i][0],
-                            candidate[i][1],
-
-                            candidate[i + 1][0],
-                            candidate[i + 1][1]
-
-                        )
-                    )
-
-                valid_routes.append(
-                    (
-                        distance,
-                        candidate
-                    )
-                )
-
-            except Exception as e:
-
-                print(
-                    "Fallback validation error:",
-                    e
-                )
-
-        # ====================================================
-        # SELECT SHORTEST SAFE ROUTE
-        # ====================================================
-
-        if not valid_routes:
 
             return None
 
-        valid_routes.sort(
-            key=lambda x: x[0]
+        if point_is_land(
+            goal_lat,
+            goal_lon
+        ):
+
+            print(
+                "GLOBAL ROUTER: destination is on land."
+            )
+
+            return None
+
+        # ========================================================
+        # DIRECT ROUTE
+        #
+        # Straight line is accepted ONLY if completely safe.
+        # ========================================================
+
+        if not segment_crosses_land(
+            start_lat,
+            start_lon,
+            goal_lat,
+            goal_lon
+        ):
+
+            print(
+                "GLOBAL ROUTER: direct route is ocean-safe."
+            )
+
+            return [
+                (
+                    start_lat,
+                    start_lon
+                ),
+                (
+                    goal_lat,
+                    goal_lon
+                )
+            ]
+
+        print(
+            "GLOBAL ROUTER: direct route crosses land."
         )
 
-        return valid_routes[0][1]
+        # ========================================================
+        # SEARCH AREA
+        #
+        # Give the router enough room to go around:
+        # UK
+        # France
+        # Spain
+        # Scandinavia
+        # islands
+        # peninsulas
+        # ========================================================
+
+        min_lat = min(
+            start_lat,
+            goal_lat
+        )
+
+        max_lat = max(
+            start_lat,
+            goal_lat
+        )
+
+        min_lon = min(
+            start_lon,
+            goal_lon
+        )
+
+        max_lon = max(
+            start_lon,
+            goal_lon
+        )
+
+        lat_span = (
+            max_lat - min_lat
+        )
+
+        lon_span = (
+            max_lon - min_lon
+        )
+
+        padding_lat = max(
+            3.0,
+            lat_span * 0.50
+        )
+
+        padding_lon = max(
+            3.0,
+            lon_span * 0.50
+        )
+
+        min_lat = max(
+            -80.0,
+            min_lat - padding_lat
+        )
+
+        max_lat = min(
+            80.0,
+            max_lat + padding_lat
+        )
+
+        min_lon = max(
+            -180.0,
+            min_lon - padding_lon
+        )
+
+        max_lon = min(
+            180.0,
+            max_lon + padding_lon
+        )
+
+        # ========================================================
+        # GRID SIZE
+        # ========================================================
+
+        lat_count = (
+            int(
+                math.ceil(
+                    (
+                        max_lat - min_lat
+                    )
+                    /
+                    grid_step
+                )
+            )
+            + 1
+        )
+
+        lon_count = (
+            int(
+                math.ceil(
+                    (
+                        max_lon - min_lon
+                    )
+                    /
+                    grid_step
+                )
+            )
+            + 1
+        )
+
+        # Prevent runaway memory/time.
+        lat_count = min(
+            lat_count,
+            220
+        )
+
+        lon_count = min(
+            lon_count,
+            220
+        )
+
+        print(
+            "GLOBAL ROUTER GRID:",
+            lat_count,
+            "x",
+            lon_count
+        )
+
+        # ========================================================
+        # GRID CONVERSION
+        # ========================================================
+
+        def node_to_coord(
+            node
+        ):
+
+            row, column = node
+
+            latitude = (
+                min_lat
+                +
+                row * grid_step
+            )
+
+            longitude = (
+                min_lon
+                +
+                column * grid_step
+            )
+
+            return (
+                latitude,
+                longitude
+            )
+
+        def coord_to_node(
+            latitude,
+            longitude
+        ):
+
+            row = int(
+                round(
+                    (
+                        latitude - min_lat
+                    )
+                    /
+                    grid_step
+                )
+            )
+
+            column = int(
+                round(
+                    (
+                        longitude - min_lon
+                    )
+                    /
+                    grid_step
+                )
+            )
+
+            row = max(
+                0,
+                min(
+                    lat_count - 1,
+                    row
+                )
+            )
+
+            column = max(
+                0,
+                min(
+                    lon_count - 1,
+                    column
+                )
+            )
+
+            return (
+                row,
+                column
+            )
+
+        # ========================================================
+        # FIND SAFE GRID NODE NEAR REAL ENDPOINT
+        # ========================================================
+
+        def nearest_safe_node(
+            latitude,
+            longitude
+        ):
+
+            base_row, base_column = (
+                coord_to_node(
+                    latitude,
+                    longitude
+                )
+            )
+
+            max_radius = 8
+
+            best_node = None
+            best_distance = float(
+                "inf"
+            )
+
+            for radius in range(
+                max_radius + 1
+            ):
+
+                for row_change in range(
+                    -radius,
+                    radius + 1
+                ):
+
+                    for column_change in range(
+                        -radius,
+                        radius + 1
+                    ):
+
+                        row = (
+                            base_row
+                            +
+                            row_change
+                        )
+
+                        column = (
+                            base_column
+                            +
+                            column_change
+                        )
+
+                        if (
+                            row < 0
+                            or
+                            row >= lat_count
+                            or
+                            column < 0
+                            or
+                            column >= lon_count
+                        ):
+                            continue
+
+                        node = (
+                            row,
+                            column
+                        )
+
+                        node_lat, node_lon = (
+                            node_to_coord(
+                                node
+                            )
+                        )
+
+                        if point_is_land(
+                            node_lat,
+                            node_lon
+                        ):
+                            continue
+
+                        if segment_crosses_land(
+                            latitude,
+                            longitude,
+                            node_lat,
+                            node_lon
+                        ):
+                            continue
+
+                        distance = (
+                            haversine_km(
+                                latitude,
+                                longitude,
+                                node_lat,
+                                node_lon
+                            )
+                        )
+
+                        if distance < best_distance:
+
+                            best_distance = (
+                                distance
+                            )
+
+                            best_node = node
+
+                if best_node is not None:
+                    break
+
+            return best_node
+
+        start_node = nearest_safe_node(
+            start_lat,
+            start_lon
+        )
+
+        goal_node = nearest_safe_node(
+            goal_lat,
+            goal_lon
+        )
+
+        if start_node is None:
+
+            print(
+                "GLOBAL ROUTER: no safe grid node near vessel."
+            )
+
+            return None
+
+        if goal_node is None:
+
+            print(
+                "GLOBAL ROUTER: no safe grid node near destination."
+            )
+
+            return None
+
+        print(
+            "GLOBAL ROUTER START NODE:",
+            start_node
+        )
+
+        print(
+            "GLOBAL ROUTER GOAL NODE:",
+            goal_node
+        )
+
+        # ========================================================
+        # OCEAN NODE CACHE
+        # ========================================================
+
+        ocean_cache = {}
+
+        def is_ocean_node(
+            node
+        ):
+
+            if node in ocean_cache:
+                return ocean_cache[node]
+
+            latitude, longitude = (
+                node_to_coord(
+                    node
+                )
+            )
+
+            result = not point_is_land(
+                latitude,
+                longitude
+            )
+
+            ocean_cache[node] = result
+
+            return result
+
+        # ========================================================
+        # EDGE SAFETY CACHE
+        # ========================================================
+
+        edge_cache = {}
+
+        def safe_edge(
+            node_a,
+            node_b
+        ):
+
+            key = (
+                node_a,
+                node_b
+            )
+
+            reverse_key = (
+                node_b,
+                node_a
+            )
+
+            if key in edge_cache:
+                return edge_cache[key]
+
+            if reverse_key in edge_cache:
+                return edge_cache[reverse_key]
+
+            lat1, lon1 = (
+                node_to_coord(
+                    node_a
+                )
+            )
+
+            lat2, lon2 = (
+                node_to_coord(
+                    node_b
+                )
+            )
+
+            result = (
+                is_ocean_node(node_b)
+                and
+                not segment_crosses_land(
+                    lat1,
+                    lon1,
+                    lat2,
+                    lon2
+                )
+            )
+
+            edge_cache[key] = result
+
+            return result
+
+        # ========================================================
+        # A* HEURISTIC
+        # ========================================================
+
+        def heuristic(
+            node
+        ):
+
+            latitude, longitude = (
+                node_to_coord(
+                    node
+                )
+            )
+
+            return haversine_km(
+                latitude,
+                longitude,
+                goal_lat,
+                goal_lon
+            )
+
+        # ========================================================
+        # 8-DIRECTION MOVEMENT
+        # ========================================================
+
+        directions = [
+
+            (-1, -1),
+            (-1,  0),
+            (-1,  1),
+
+            ( 0, -1),
+            ( 0,  1),
+
+            ( 1, -1),
+            ( 1,  0),
+            ( 1,  1)
+
+        ]
+
+        # ========================================================
+        # A* SEARCH
+        # ========================================================
+
+        # ========================================================
+        # FAST A* OCEAN SEARCH
+        # ========================================================
+
+        open_set = []
+
+        heapq.heappush(
+            open_set,
+            (
+                heuristic(
+                    start_node
+                ),
+                0.0,
+                start_node
+            )
+        )
+
+        came_from = {}
+
+        g_score = {
+            start_node: 0.0
+        }
+
+        visited = set()
+
+        found = False
+
+        # --------------------------------------------------------
+        # Practical search corridor.
+        # This prevents very large global searches.
+        # --------------------------------------------------------
+
+        corridor_margin = 35
+
+        min_search_row = max(
+            0,
+            min(
+                start_node[0],
+                goal_node[0]
+            )
+            -
+            corridor_margin
+        )
+
+        max_search_row = min(
+            lat_count - 1,
+            max(
+                start_node[0],
+                goal_node[0]
+            )
+            +
+            corridor_margin
+        )
+
+        min_search_column = max(
+            0,
+            min(
+                start_node[1],
+                goal_node[1]
+            )
+            -
+            corridor_margin
+        )
+
+        max_search_column = min(
+            lon_count - 1,
+            max(
+                start_node[1],
+                goal_node[1]
+            )
+            +
+            corridor_margin
+        )
+
+        corridor_rows = (
+            max_search_row
+            -
+            min_search_row
+            +
+            1
+        )
+
+        corridor_columns = (
+            max_search_column
+            -
+            min_search_column
+            +
+            1
+        )
+
+        max_iterations = (
+            corridor_rows
+            *
+            corridor_columns
+            *
+            4
+        )
+
+        iterations = 0
+
+        while (
+            open_set
+            and
+            iterations < max_iterations
+        ):
+
+            iterations += 1
+
+            (
+                _priority,
+                current_cost,
+                current
+            ) = heapq.heappop(
+                open_set
+            )
+
+            if current in visited:
+                continue
+
+            visited.add(
+                current
+            )
+
+            if current == goal_node:
+
+                found = True
+
+                break
+
+            current_latitude, current_longitude = (
+                node_to_coord(
+                    current
+                )
+            )
+
+            for direction in directions:
+
+                row_change, column_change = (
+                    direction
+                )
+
+                neighbor = (
+                    current[0]
+                    +
+                    row_change,
+                    current[1]
+                    +
+                    column_change
+                )
+
+                # Stay inside the practical corridor.
+                if (
+                    neighbor[0] < min_search_row
+                    or
+                    neighbor[0] > max_search_row
+                    or
+                    neighbor[1] < min_search_column
+                    or
+                    neighbor[1] > max_search_column
+                ):
+                    continue
+
+                if neighbor in visited:
+                    continue
+
+                if not safe_edge(
+                    current,
+                    neighbor
+                ):
+                    continue
+
+                neighbor_latitude, neighbor_longitude = (
+                    node_to_coord(
+                        neighbor
+                    )
+                )
+
+                movement_cost = (
+                    haversine_km(
+                        current_latitude,
+                        current_longitude,
+                        neighbor_latitude,
+                        neighbor_longitude
+                    )
+                )
+
+                new_cost = (
+                    current_cost
+                    +
+                    movement_cost
+                )
+
+                previous_cost = g_score.get(
+                    neighbor,
+                    float("inf")
+                )
+
+                if new_cost < previous_cost:
+
+                    came_from[
+                        neighbor
+                    ] = current
+
+                    g_score[
+                        neighbor
+                    ] = new_cost
+
+                    priority = (
+                        new_cost
+                        +
+                        heuristic(
+                            neighbor
+                        )
+                    )
+
+                    heapq.heappush(
+                        open_set,
+                        (
+                            priority,
+                            new_cost,
+                            neighbor
+                        )
+                    )
+
+        print(
+            "GLOBAL ROUTER SEARCH:"
+        )
+
+        print(
+            "Iterations:",
+            iterations
+        )
+
+        print(
+            "Visited:",
+            len(visited)
+        )
+
+        print(
+            "Corridor:",
+            corridor_rows,
+            "x",
+            corridor_columns
+        )
+
+        if not found:
+
+            print(
+                "GLOBAL ROUTER: no ocean-safe route found."
+            )
+
+            print(
+                "Iterations:",
+                iterations
+            )
+
+            print(
+                "Visited:",
+                len(visited)
+            )
+
+            print(
+                "Grid:",
+                lat_count,
+                "x",
+                lon_count
+            )
+
+            print(
+                "Open set remaining:",
+                len(open_set)
+            )
+
+            print(
+                "Start node:",
+                start_node
+            )
+
+            print(
+                "Goal node:",
+                goal_node
+            )
+
+            if g_score:
+
+                closest_node = min(
+                    g_score,
+                    key=lambda node: heuristic(node)
+                )
+
+                closest_lat, closest_lon = (
+                    node_to_coord(
+                        closest_node
+                    )
+                )
+
+                print(
+                    "Closest explored node:",
+                    closest_node
+                )
+
+                print(
+                    "Closest explored coordinate:",
+                    closest_lat,
+                    closest_lon
+                )
+
+                print(
+                    "Distance from closest explored node:",
+                    heuristic(
+                        closest_node
+                    ),
+                    "km"
+                )
+
+            return None
+
+        # ========================================================
+        # RECONSTRUCT PATH
+        # ========================================================
+
+        nodes = []
+
+        current = goal_node
+
+        nodes.append(
+            current
+        )
+
+        while current != start_node:
+
+            current = came_from.get(
+                current
+            )
+
+            if current is None:
+
+                print(
+                    "GLOBAL ROUTER: path reconstruction failed."
+                )
+
+                return None
+
+            nodes.append(
+                current
+            )
+
+        nodes.reverse()
+
+        raw_route = [
+
+            node_to_coord(
+                node
+            )
+
+            for node in nodes
+
+        ]
+
+        # ========================================================
+        # EXACT REAL ENDPOINTS
+        # ========================================================
+
+        raw_route[0] = (
+            start_lat,
+            start_lon
+        )
+
+        raw_route[-1] = (
+            goal_lat,
+            goal_lon
+        )
+
+        # ========================================================
+        # CREATE TURNING ROUTE
+        #
+        # Keep important direction changes.
+        # Do NOT reduce the whole route to a straight line.
+        # ========================================================
+
+        simplified = [
+
+            raw_route[0]
+
+        ]
+
+        if len(raw_route) > 2:
+
+            previous_direction = None
+
+            for index in range(
+                1,
+                len(raw_route) - 1
+            ):
+
+                lat_a, lon_a = (
+                    raw_route[
+                        index - 1
+                    ]
+                )
+
+                lat_b, lon_b = (
+                    raw_route[
+                        index
+                    ]
+                )
+
+                lat_c, lon_c = (
+                    raw_route[
+                        index + 1
+                    ]
+                )
+
+                direction_in = (
+                    bearing_degrees(
+                        lat_a,
+                        lon_a,
+                        lat_b,
+                        lon_b
+                    )
+                )
+
+                direction_out = (
+                    bearing_degrees(
+                        lat_b,
+                        lon_b,
+                        lat_c,
+                        lon_c
+                    )
+                )
+
+                turn = (
+                    angle_difference(
+                        direction_in,
+                        direction_out
+                    )
+                )
+
+                if (
+                    previous_direction is None
+                    or
+                    turn >= 8.0
+                ):
+
+                    simplified.append(
+                        raw_route[
+                            index
+                        ]
+                    )
+
+                    previous_direction = (
+                        direction_out
+                    )
+
+            simplified.append(
+                raw_route[-1]
+            )
+
+        else:
+
+            simplified.append(
+                raw_route[-1]
+            )
+
+        # ========================================================
+        # DENSIFY ROUTE
+        #
+        # This makes the frontend display a smooth sequence of
+        # navigation points instead of only a few huge jumps.
+        # ========================================================
+
+        final_route = []
+
+        for index in range(
+            len(simplified) - 1
+        ):
+
+            lat1, lon1 = (
+                simplified[
+                    index
+                ]
+            )
+
+            lat2, lon2 = (
+                simplified[
+                    index + 1
+                ]
+            )
+
+            distance = (
+                haversine_km(
+                    lat1,
+                    lon1,
+                    lat2,
+                    lon2
+                )
+            )
+
+            pieces = max(
+                1,
+                int(
+                    math.ceil(
+                        distance / 50.0
+                    )
+                )
+            )
+
+            for piece in range(
+                pieces
+            ):
+
+                ratio = (
+                    piece
+                    /
+                    pieces
+                )
+
+                latitude = (
+                    lat1
+                    +
+                    (
+                        lat2 - lat1
+                    )
+                    *
+                    ratio
+                )
+
+                longitude = (
+                    lon1
+                    +
+                    (
+                        lon2 - lon1
+                    )
+                    *
+                    ratio
+                )
+
+                final_route.append(
+                    (
+                        latitude,
+                        longitude
+                    )
+                )
+
+        final_route.append(
+            simplified[-1]
+        )
+
+        # ========================================================
+        # FINAL SAFETY VALIDATION
+        # ========================================================
+
+        for index, point in enumerate(
+            final_route
+        ):
+
+            latitude, longitude = point
+
+            if point_is_land(
+                latitude,
+                longitude
+            ):
+
+                print(
+                    "GLOBAL ROUTER: point validation failed."
+                )
+
+                return None
+
+            if index > 0:
+
+                previous_latitude, previous_longitude = (
+                    final_route[
+                        index - 1
+                    ]
+                )
+
+                if segment_crosses_land(
+                    previous_latitude,
+                    previous_longitude,
+                    latitude,
+                    longitude
+                ):
+
+                    print(
+                        "GLOBAL ROUTER: segment validation failed."
+                    )
+
+                    return None
+
+        # ========================================================
+        # FINAL DISTANCE
+        # ========================================================
+
+        total_distance = 0.0
+
+        for index in range(
+            len(final_route) - 1
+        ):
+
+            total_distance += (
+                haversine_km(
+                    final_route[index][0],
+                    final_route[index][1],
+                    final_route[index + 1][0],
+                    final_route[index + 1][1]
+                )
+            )
+
+        print()
+        print(
+            "GLOBAL OCEAN ROUTER SUCCESS"
+        )
+
+        print(
+            "Raw grid nodes:",
+            len(raw_route)
+        )
+
+        print(
+            "Turn waypoints:",
+            len(simplified)
+        )
+
+        print(
+            "Final route points:",
+            len(final_route)
+        )
+
+        print(
+            "Distance:",
+            round(
+                total_distance,
+                2
+            ),
+            "km"
+        )
+
+        print(
+            "=" * 70
+        )
+
+        return final_route
+
+    def create_safe_fallback_route():
+
+        print()
+        print(
+            "PPO route incomplete."
+        )
+
+        print(
+            "Using GLOBAL OCEAN ROUTER..."
+        )
+
+        return create_global_ocean_route(
+            current_lat,
+            current_lon,
+            destination_lat,
+            destination_lon
+        )
 
     # ========================================================
     # CHECK CURRENT PPO ROUTE
@@ -7695,3 +8642,5 @@ def optimize_route_from_ais(
             )
 
     }
+
+
