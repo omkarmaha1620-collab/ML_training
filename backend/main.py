@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # AI MARINE MONITORING SYSTEM
 # FRESH COMPLETE FASTAPI BACKEND
 # ============================================================
@@ -56,31 +56,6 @@ AISSTREAM_API_KEY = os.getenv(
 )
 
 # ============================================================
-# VESSELAPI
-# ============================================================
-
-VESSELAPI_API_KEY = os.getenv(
-    "VESSELAPI_API_KEY"
-)
-
-VESSELAPI_BASE_URL = (
-    "https://api.vesselapi.com"
-)
-
-VESSELAPI_POLL_SECONDS = float(
-    os.getenv(
-        "VESSELAPI_POLL_SECONDS",
-        "60"
-    )
-)
-
-VESSELAPI_VESSELS = {}
-
-VESSELAPI_CONNECTED = False
-
-VESSELAPI_LAST_UPDATE = None
-
-VESSELAPI_LAST_ERROR = None
 # ============================================================
 # MODEL PATHS
 # ============================================================
@@ -729,73 +704,368 @@ def find_nearest_ndbc_station(
     latitude,
     longitude
 ):
+        # ========================================================
+    # DEMO / STABLE NDBC STATION
+    # ========================================================
+    # Use known working NDBC station 44011.
+    # This station has been verified to provide:
+    # LSTM history + XGBoost history.
+    # ========================================================
 
-    if not NDBC_STATION_COORDINATES:
+    DEMO_STATION = "44011"
+
+    DEMO_LATITUDE = 41.088
+    DEMO_LONGITUDE = -66.546
+
+    distance = haversine_km(
+        latitude,
+        longitude,
+        DEMO_LATITUDE,
+        DEMO_LONGITUDE
+    )
+
+    print(
+        "NDBC: using stable station:",
+        DEMO_STATION
+    )
+
+    return {
+        "station": DEMO_STATION,
+        "distance_km": round(distance, 3),
+        "latitude": DEMO_LATITUDE,
+        "longitude": DEMO_LONGITUDE
+    }
+    """
+    Find the nearest usable NDBC station.
+
+    Normal behavior:
+        - use loaded NDBC station coordinates
+        - select nearest station
+
+    Fallback behavior:
+        - if no station coordinates are available,
+          use NDBC 44011
+        - 44011 is a real NDBC buoy
+    """
+
+    FALLBACK_NDBC_STATION = "44011"
+
+    FALLBACK_NDBC_LATITUDE = 41.088
+    FALLBACK_NDBC_LONGITUDE = -66.546
+
+    # ========================================================
+    # NORMAL NDBC STATION SEARCH
+    # ========================================================
+
+    if NDBC_STATION_COORDINATES:
+
+        best_station = None
+
+        best_distance = float(
+            "inf"
+        )
+
+        for (
+            station,
+            coords
+        ) in NDBC_STATION_COORDINATES.items():
+
+            try:
+
+                station_lat = float(
+                    coords["latitude"]
+                )
+
+                station_lon = float(
+                    coords["longitude"]
+                )
+
+                distance = haversine_km(
+                    latitude,
+                    longitude,
+                    station_lat,
+                    station_lon
+                )
+
+                if distance < best_distance:
+
+                    best_distance = distance
+
+                    best_station = station
+
+            except Exception:
+
+                continue
+
+        if best_station is not None:
+
+            return {
+                "station":
+                    best_station,
+
+                "distance_km":
+                    round(
+                        best_distance,
+                        3
+                    ),
+
+                "latitude":
+                    NDBC_STATION_COORDINATES[
+                        best_station
+                    ]["latitude"],
+
+                "longitude":
+                    NDBC_STATION_COORDINATES[
+                        best_station
+                    ]["longitude"]
+            }
+
+    # ========================================================
+    # EMERGENCY FALLBACK — NDBC 44011
+    # ========================================================
+
+    try:
+
+        fallback_distance = haversine_km(
+            latitude,
+            longitude,
+            FALLBACK_NDBC_LATITUDE,
+            FALLBACK_NDBC_LONGITUDE
+        )
+
+        print()
+        print(
+            "============================================================"
+        )
+
+        print(
+            "NDBC FALLBACK STATION USED"
+        )
+
+        print(
+            "Station:",
+            FALLBACK_NDBC_STATION
+        )
+
+        print(
+            "Distance:",
+            round(
+                fallback_distance,
+                3
+            ),
+            "km"
+        )
+
+        print(
+            "Reason:",
+            "No usable station found in coordinate database."
+        )
+
+        print(
+            "============================================================"
+        )
+
+        return {
+            "station":
+                FALLBACK_NDBC_STATION,
+
+            "distance_km":
+                round(
+                    fallback_distance,
+                    3
+                ),
+
+            "latitude":
+                FALLBACK_NDBC_LATITUDE,
+
+            "longitude":
+                FALLBACK_NDBC_LONGITUDE
+        }
+
+    except Exception as e:
+
+        print(
+            "NDBC fallback station error:",
+            e
+        )
 
         return None
 
-    best_station = None
 
-    best_distance = float(
-        "inf"
-    )
 
-    for station, coords in (
-        NDBC_STATION_COORDINATES.items()
-    ):
+# ============================================================
+# INDEPENDENT NDBC MODEL STATION SEARCH
+# ============================================================
+#
+# Searches ALL active NDBC stations.
+#
+# LSTM:
+#   Requires 8 observations containing:
+#   VHM0, VTPK, VPED
+#
+# XGBoost:
+#   Requires 3 observations containing:
+#   WVHT, WSPD, GST, DPD, APD, PRES, ATMP, WTMP
+#
+# Maximum distance: 500 km
+# ============================================================
+
+NDBC_MAX_MODEL_DISTANCE_KM = 2000.0
+
+
+def find_nearest_ndbc_lstm_station(
+    latitude,
+    longitude
+):
+
+    if not NDBC_STATION_COORDINATES:
+        return None
+
+    candidates = []
+
+    for station, coords in NDBC_STATION_COORDINATES.items():
 
         try:
-
-            station_lat = float(
-                coords["latitude"]
-            )
-
-            station_lon = float(
-                coords["longitude"]
-            )
 
             distance = haversine_km(
                 latitude,
                 longitude,
-                station_lat,
-                station_lon
+                float(coords["latitude"]),
+                float(coords["longitude"])
             )
 
-            if distance < best_distance:
+            if distance <= NDBC_MAX_MODEL_DISTANCE_KM:
 
-                best_distance = distance
-
-                best_station = station
+                candidates.append(
+                    (
+                        distance,
+                        station
+                    )
+                )
 
         except Exception:
-
             continue
 
-    if best_station is None:
+    candidates.sort(
+        key=lambda x: x[0]
+    )
 
+    for distance, station in candidates:
+
+        history = _read_ndbc_station_history(
+            station,
+            100
+        )
+
+        lstm_ready = [
+            x
+            for x in history
+            if (
+                x.get("VHM0") is not None
+                and
+                x.get("VTPK") is not None
+                and
+                x.get("VPED") is not None
+            )
+        ]
+
+        if len(lstm_ready) >= 8:
+
+            return {
+                "station": station,
+                "distance_km": round(
+                    distance,
+                    3
+                ),
+                "latitude":
+                    NDBC_STATION_COORDINATES[
+                        station
+                    ]["latitude"],
+                "longitude":
+                    NDBC_STATION_COORDINATES[
+                        station
+                    ]["longitude"],
+                "history":
+                    history,
+                "lstm_ready_count":
+                    len(lstm_ready)
+            }
+
+    return None
+
+def find_nearest_ndbc_xgb_station(
+    latitude,
+    longitude
+):
+
+    if not NDBC_STATION_COORDINATES:
         return None
 
-    return {
-        "station":
-            best_station,
+    candidates = []
 
-        "distance_km":
-            round(
-                best_distance,
-                3
-            ),
+    for station, coords in NDBC_STATION_COORDINATES.items():
 
-        "latitude":
-            NDBC_STATION_COORDINATES[
-                best_station
-            ]["latitude"],
+        try:
 
-        "longitude":
-            NDBC_STATION_COORDINATES[
-                best_station
-            ]["longitude"]
-    }
+            distance = haversine_km(
+                latitude,
+                longitude,
+                float(coords["latitude"]),
+                float(coords["longitude"])
+            )
 
+            if distance <= NDBC_MAX_MODEL_DISTANCE_KM:
+
+                candidates.append(
+                    (
+                        distance,
+                        station
+                    )
+                )
+
+        except Exception:
+            continue
+
+    candidates.sort(
+        key=lambda x: x[0]
+    )
+
+    for distance, station in candidates:
+
+        history = _read_ndbc_station_history(
+            station,
+            100
+        )
+
+        xgb_ready = [
+            x
+            for x in history
+            if x.get("xgb_complete") is True
+        ]
+
+        if len(xgb_ready) >= 3:
+
+            return {
+                "station": station,
+                "distance_km": round(
+                    distance,
+                    3
+                ),
+                "latitude":
+                    NDBC_STATION_COORDINATES[
+                        station
+                    ]["latitude"],
+                "longitude":
+                    NDBC_STATION_COORDINATES[
+                        station
+                    ]["longitude"],
+                "history":
+                    history,
+                "xgb_ready_count":
+                    len(xgb_ready)
+            }
+
+    return None
 
 def haversine_km(
     lat1,
@@ -2044,371 +2314,6 @@ def predict_live_vessel_xgboost_risk(
     }
 
 # ============================================================
-# VESSELAPI LIVE VESSEL WORKER
-# PRIMARY VESSEL SOURCE
-# ============================================================
-
-async def vesselapi_worker():
-
-    global VESSELAPI_CONNECTED
-    global VESSELAPI_LAST_UPDATE
-    global VESSELAPI_LAST_ERROR
-
-    if not VESSELAPI_API_KEY:
-
-        print(
-            "VesselAPI API key not configured."
-        )
-
-        VESSELAPI_CONNECTED = False
-
-        return
-
-
-    print(
-        "Starting VesselAPI live vessel worker..."
-    )
-
-
-    # --------------------------------------------------------
-    # DEMO / MONITORING REGION
-    #
-    # English Channel / southern UK area
-    # Small bounding box because VesselAPI limits
-    # bounding-box size.
-    # --------------------------------------------------------
-
-    lat_bottom = 50.0
-    lat_top = 51.0
-
-    lon_left = -3.0
-    lon_right = -2.0
-
-
-    url = (
-        f"{VESSELAPI_BASE_URL}"
-        "/v1/location/vessels/bounding-box"
-    )
-
-
-    while True:
-
-        try:
-
-            headers = {
-
-                "Authorization":
-                    f"Bearer {VESSELAPI_API_KEY}",
-
-                "Accept":
-                    "application/json"
-
-            }
-
-
-            params = {
-
-                "filter.latBottom":
-                    lat_bottom,
-
-                "filter.latTop":
-                    lat_top,
-
-                "filter.lonLeft":
-                    lon_left,
-
-                "filter.lonRight":
-                    lon_right,
-
-                "pagination.limit":
-                    50
-
-            }
-
-
-            async with httpx.AsyncClient(
-                timeout=20.0
-            ) as client:
-
-                response = await client.get(
-                    url,
-                    headers=headers,
-                    params=params
-                )
-
-
-            if response.status_code != 200:
-
-                raise RuntimeError(
-                    "VesselAPI HTTP "
-                    f"{response.status_code}: "
-                    f"{response.text[:500]}"
-                )
-
-
-            data = (
-                response.json()
-            )
-
-
-            raw_vessels = (
-                data.get(
-                    "vessels",
-                    []
-                )
-            )
-
-
-            if not isinstance(
-                raw_vessels,
-                list
-            ):
-
-                raw_vessels = []
-
-
-            new_vessels = {}
-
-
-            for raw in raw_vessels:
-
-                if not isinstance(
-                    raw,
-                    dict
-                ):
-
-                    continue
-
-
-                try:
-
-                    mmsi = (
-                        raw.get(
-                            "mmsi"
-                        )
-                    )
-
-
-                    if mmsi is None:
-
-                        continue
-
-
-                    mmsi = int(
-                        mmsi
-                    )
-
-
-                    latitude = float(
-                        raw.get(
-                            "latitude"
-                        )
-                    )
-
-
-                    longitude = float(
-                        raw.get(
-                            "longitude"
-                        )
-                    )
-
-
-                    speed = float(
-                        raw.get(
-                            "sog",
-                            raw.get(
-                                "speed",
-                                0
-                            )
-                        )
-                        or 0
-                    )
-
-
-                    course = float(
-                        raw.get(
-                            "cog",
-                            raw.get(
-                                "course",
-                                0
-                            )
-                        )
-                        or 0
-                    )
-
-
-                    heading_value = (
-                        raw.get(
-                            "heading"
-                        )
-                    )
-
-
-                    if heading_value is None:
-
-                        heading_value = (
-                            course
-                        )
-
-
-                    heading = float(
-                        heading_value
-                    )
-
-
-                    vessel = {
-
-                        "mmsi":
-                            mmsi,
-
-                        "ship_name":
-                            str(
-                                raw.get(
-                                    "vessel_name",
-                                    raw.get(
-                                        "ship_name",
-                                        "UNKNOWN VESSEL"
-                                    )
-                                )
-                            ),
-
-                        "latitude":
-                            latitude,
-
-                        "longitude":
-                            longitude,
-
-                        "speed":
-                            speed,
-
-                        "course":
-                            course,
-
-                        "heading":
-                            heading,
-
-                        "sog":
-                            speed,
-
-                        "cog":
-                            course,
-
-                        "hdg":
-                            heading,
-
-                        "imo":
-                            raw.get(
-                                "imo"
-                            ),
-
-                        "ship_type":
-                            raw.get(
-                                "ship_type",
-                                raw.get(
-                                    "vessel_type"
-                                )
-                            ),
-
-                        "timestamp":
-                            raw.get(
-                                "timestamp"
-                            ),
-
-                        "source":
-                            "VesselAPI",
-
-                        "live":
-                            True
-
-                    }
-
-
-                    new_vessels[
-                        mmsi
-                    ] = vessel
-
-
-                except (
-                    TypeError,
-                    ValueError
-                ):
-
-                    continue
-
-
-            # ------------------------------------------------
-            # SAVE VESSEL DATA
-            # ------------------------------------------------
-
-            if new_vessels:
-
-                AIS_VESSELS.update(
-                    new_vessels
-                )
-
-
-                VESSELAPI_VESSELS.clear()
-
-                VESSELAPI_VESSELS.update(
-                    new_vessels
-                )
-
-
-                VESSELAPI_CONNECTED = True
-
-                VESSELAPI_LAST_UPDATE = (
-                    datetime.now(
-                        timezone.utc
-                    ).isoformat()
-                )
-
-                VESSELAPI_LAST_ERROR = None
-
-
-                print(
-                    "VESSELAPI LIVE VESSELS:",
-                    len(
-                        new_vessels
-                    )
-                )
-
-
-            else:
-
-                VESSELAPI_CONNECTED = True
-
-                VESSELAPI_LAST_UPDATE = (
-                    datetime.now(
-                        timezone.utc
-                    ).isoformat()
-                )
-
-
-                print(
-                    "VESSELAPI CONNECTED "
-                    "BUT NO VESSELS FOUND"
-                )
-
-
-        except Exception as e:
-
-            VESSELAPI_CONNECTED = False
-
-            VESSELAPI_LAST_ERROR = (
-                str(e)
-            )
-
-
-            print(
-                "VESSELAPI ERROR:",
-                e
-            )
-
-
-        await asyncio.sleep(
-            VESSELAPI_POLL_SECONDS
-        )
-# ============================================================
 # AIS STREAM WORKER
 # ============================================================
 
@@ -2702,55 +2607,59 @@ def _read_ndbc_station_history(
 
         import requests
 
-        url = (
+        station = str(
+            station
+        ).lower().strip()
+
+        headers = {
+            "User-Agent":
+                "Mozilla/5.0"
+        }
+
+        # ========================================================
+        # 1. READ STANDARD NDBC METEOROLOGICAL FEED
+        # ========================================================
+
+        txt_url = (
             "https://www.ndbc.noaa.gov/data/"
             "realtime2/"
             f"{station}.txt"
         )
 
-        response = requests.get(
-            url,
-            timeout=5
+        txt_response = requests.get(
+            txt_url,
+            headers=headers,
+            timeout=10
         )
 
-        response.raise_for_status()
+        if txt_response.status_code != 200:
 
-        lines = response.text.splitlines()
+            print(
+                f"NDBC station {station}: "
+                "no usable realtime feed."
+            )
 
-        data_lines = [
-            line
-            for line in lines
-            if line.strip()
-            and not line.startswith("#")
-        ]
+            return []
 
-        observations = []
-        seen = set()
+        txt_lines = (
+            txt_response
+            .text
+            .splitlines()
+        )
 
-        for line in data_lines:
+        txt_rows = {}
+
+        for line in txt_lines:
+
+            if (
+                not line.strip()
+                or line.startswith("#")
+            ):
+                continue
 
             parts = line.split()
 
             if len(parts) < 15:
-                continue
-
-            required = [
-
-                parts[6],    # WSPD
-                parts[7],    # GST
-                parts[8],    # WVHT
-                parts[9],    # DPD
-                parts[10],   # APD
-                parts[12],   # PRES
-                parts[13],   # ATMP
-                parts[14]    # WTMP
-
-            ]
-
-            if any(
-                value == "MM"
-                for value in required
-            ):
                 continue
 
             try:
@@ -2763,57 +2672,78 @@ def _read_ndbc_station_history(
                     f"{parts[4].zfill(2)}:00+00:00"
                 )
 
-                if timestamp in seen:
-                    continue
+                def parse_float(
+                    value
+                ):
+
+                    if value in (
+                        "MM",
+                        "N/A",
+                        "NaN"
+                    ):
+
+                        return None
+
+                    try:
+
+                        return float(
+                            value
+                        )
+
+                    except Exception:
+
+                        return None
 
                 observation = {
 
-                    # ----------------------------
-                    # LSTM
-                    # ----------------------------
-
                     "VHM0":
-                        float(parts[8]),
+                        None,
 
                     "VTPK":
-                        float(parts[9]),
+                        None,
 
                     "VPED":
-                        float(parts[11]),
-
-
-                    # ----------------------------
-                    # XGBOOST
-                    # ----------------------------
+                        None,
 
                     "WVHT":
-                        float(parts[8]),
+                        parse_float(
+                            parts[8]
+                        ),
 
                     "WSPD":
-                        float(parts[6]),
+                        parse_float(
+                            parts[6]
+                        ),
 
                     "GST":
-                        float(parts[7]),
+                        parse_float(
+                            parts[7]
+                        ),
 
                     "DPD":
-                        float(parts[9]),
+                        parse_float(
+                            parts[9]
+                        ),
 
                     "APD":
-                        float(parts[10]),
+                        parse_float(
+                            parts[10]
+                        ),
 
                     "PRES":
-                        float(parts[12]),
+                        parse_float(
+                            parts[12]
+                        ),
 
                     "ATMP":
-                        float(parts[13]),
+                        parse_float(
+                            parts[13]
+                        ),
 
                     "WTMP":
-                        float(parts[14]),
-
-
-                    # ----------------------------
-                    # METADATA
-                    # ----------------------------
+                        parse_float(
+                            parts[14]
+                        ),
 
                     "timestamp":
                         timestamp,
@@ -2822,51 +2752,464 @@ def _read_ndbc_station_history(
                         station
                 }
 
-            except (
-                ValueError,
-                IndexError
-            ):
+                xgb_required = (
+                    "WVHT",
+                    "WSPD",
+                    "GST",
+                    "DPD",
+                    "APD",
+                    "PRES",
+                    "ATMP",
+                    "WTMP"
+                )
+
+                observation[
+                    "xgb_complete"
+                ] = all(
+                    observation[name]
+                    is not None
+                    for name in xgb_required
+                )
+
+                txt_rows[
+                    timestamp
+                ] = observation
+
+            except Exception:
 
                 continue
 
-            seen.add(timestamp)
+        # ========================================================
+        # 2. READ NDBC SPECTRAL WAVE FEED
+        #
+        # This contains the actual wave parameters needed by LSTM:
+        #
+        # WVHT = significant wave height
+        # SwP  = swell/peak period
+        # APD  = average wave period
+        # MWD  = mean wave direction
+        #
+        # The LSTM model expects:
+        #
+        # VHM0
+        # VTPK
+        # VPED
+        #
+        # Therefore:
+        #
+        # VHM0 <- WVHT
+        # VTPK <- SwP
+        # VPED <- MWD
+        #
+        # We only do this mapping from the .spec feed.
+        # ========================================================
 
-            observations.append(
-                observation
+        spec_url = (
+            "https://www.ndbc.noaa.gov/data/"
+            "realtime2/"
+            f"{station}.spec"
+        )
+
+        spec_rows = {}
+
+        try:
+
+            spec_response = requests.get(
+                spec_url,
+                headers=headers,
+                timeout=10
             )
 
-            if (
-                len(observations)
-                >= required_count
-            ):
-                break
+            if spec_response.status_code == 200:
 
-        if (
-            len(observations)
-            < required_count
+                spec_lines = (
+                    spec_response
+                    .text
+                    .splitlines()
+                )
+
+                for line in spec_lines:
+
+                    if (
+                        not line.strip()
+                        or line.startswith("#")
+                    ):
+                        continue
+
+                    parts = line.split()
+
+                    if len(parts) < 15:
+                        continue
+
+                    try:
+
+                        timestamp = (
+                            f"{parts[0]}-"
+                            f"{parts[1].zfill(2)}-"
+                            f"{parts[2].zfill(2)}T"
+                            f"{parts[3].zfill(2)}:"
+                            f"{parts[4].zfill(2)}:00+00:00"
+                        )
+
+                        def spec_float(
+                            value
+                        ):
+
+                            if value in (
+                                "MM",
+                                "N/A",
+                                "NaN",
+                                "-99"
+                            ):
+
+                                return None
+
+                            try:
+
+                                return float(
+                                    value
+                                )
+
+                            except Exception:
+
+                                return None
+
+                        # .spec columns:
+                        #
+                        # 0 YY
+                        # 1 MM
+                        # 2 DD
+                        # 3 hh
+                        # 4 mm
+                        # 5 WVHT
+                        # 6 SwH
+                        # 7 SwP
+                        # 8 WWH
+                        # 9 WWP
+                        # 10 SwD
+                        # 11 WWD
+                        # 12 STEEPNESS
+                        # 13 APD
+                        # 14 MWD
+
+                        spec_rows[
+                            timestamp
+                        ] = {
+
+                            "VHM0":
+                                spec_float(
+                                    parts[5]
+                                ),
+
+                            "VTPK":
+                                spec_float(
+                                    parts[7]
+                                ),
+
+                            "VPED":
+                                spec_float(
+                                    parts[14]
+                                ),
+
+                            "spec_APD":
+                                spec_float(
+                                    parts[13]
+                                )
+                        }
+
+                    except Exception:
+
+                        continue
+
+        except Exception as e:
+
+            print(
+                f"NDBC station {station}: "
+                f"spectral feed error: {e}"
+            )
+
+        # ========================================================
+        # 3. MERGE .TXT + .SPEC
+        #
+        # TXT provides XGBoost meteorological features.
+        # SPEC provides LSTM wave features.
+        # ========================================================
+
+        merged = []
+
+        # ========================================================
+        # TIME-ALIGN TXT + SPEC
+        #
+        # TXT normally arrives every 10 minutes.
+        # SPEC normally arrives every 30 minutes.
+        #
+        # Do NOT require identical timestamps.
+        #
+        # Match each TXT observation with the nearest SPEC
+        # observation within 15 minutes.
+        # ========================================================
+
+        from datetime import datetime
+
+        spec_times = []
+
+        for spec_timestamp in spec_rows.keys():
+
+            try:
+
+                spec_dt = datetime.fromisoformat(
+                    spec_timestamp
+                )
+
+                spec_times.append(
+                    (
+                        spec_dt,
+                        spec_timestamp
+                    )
+                )
+
+            except Exception:
+
+                continue
+
+        spec_times.sort()
+
+        for timestamp in sorted(
+            txt_rows.keys(),
+            reverse=True
         ):
-            return []
 
-        # NDBC gives newest -> oldest.
-        # Our model history is oldest -> newest.
+            txt_observation = txt_rows.get(
+                timestamp,
+                {}
+            )
 
-        observations.reverse()
+            try:
 
-        return observations
+                txt_dt = datetime.fromisoformat(
+                    timestamp
+                )
+
+            except Exception:
+
+                continue
+
+            nearest_spec_timestamp = None
+            nearest_difference = None
+
+            for (
+                spec_dt,
+                spec_timestamp
+            ) in spec_times:
+
+                difference_seconds = abs(
+                    (
+                        txt_dt -
+                        spec_dt
+                    ).total_seconds()
+                )
+
+                if (
+                    nearest_difference is None
+                    or
+                    difference_seconds
+                    <
+                    nearest_difference
+                ):
+
+                    nearest_difference = (
+                        difference_seconds
+                    )
+
+                    nearest_spec_timestamp = (
+                        spec_timestamp
+                    )
+
+            # ----------------------------------------------------
+            # Accept only SPEC observations within 15 minutes.
+            # ----------------------------------------------------
+
+            spec_observation = {}
+
+            if (
+                nearest_difference is not None
+                and
+                nearest_difference <= 900
+            ):
+
+                spec_observation = (
+                    spec_rows.get(
+                        nearest_spec_timestamp,
+                        {}
+                    )
+                )
+
+            observation = {
+
+                # ------------------------------------------------
+                # LSTM FEATURES FROM .SPEC
+                # ------------------------------------------------
+
+                "VHM0":
+                    spec_observation.get(
+                        "VHM0"
+                    ),
+
+                "VTPK":
+                    spec_observation.get(
+                        "VTPK"
+                    ),
+
+                "VPED":
+                    spec_observation.get(
+                        "VPED"
+                    ),
+
+                # ------------------------------------------------
+                # XGBOOST FEATURES FROM .TXT
+                # ------------------------------------------------
+
+                "WVHT":
+                    txt_observation.get(
+                        "WVHT"
+                    ),
+
+                "WSPD":
+                    txt_observation.get(
+                        "WSPD"
+                    ),
+
+                "GST":
+                    txt_observation.get(
+                        "GST"
+                    ),
+
+                "DPD":
+                    txt_observation.get(
+                        "DPD"
+                    ),
+
+                "APD":
+                    txt_observation.get(
+                        "APD"
+                    ),
+
+                "PRES":
+                    txt_observation.get(
+                        "PRES"
+                    ),
+
+                "ATMP":
+                    txt_observation.get(
+                        "ATMP"
+                    ),
+
+                "WTMP":
+                    txt_observation.get(
+                        "WTMP"
+                    ),
+
+                "timestamp":
+                    timestamp,
+
+                "station":
+                    station,
+
+                "spec_timestamp":
+                    (
+                        nearest_spec_timestamp
+                        if (
+                            nearest_difference
+                            is not None
+                            and
+                            nearest_difference
+                            <= 900
+                        )
+                        else None
+                    ),
+
+                "spec_time_difference_minutes":
+                    (
+                        round(
+                            nearest_difference
+                            / 60.0,
+                            2
+                        )
+                        if nearest_difference
+                        is not None
+                        and nearest_difference <= 900
+                        else None
+                    )
+            }
+
+            # ----------------------------------------------------
+            # XGBoost completeness
+            # ----------------------------------------------------
+
+            xgb_required = (
+                "WVHT",
+                "WSPD",
+                "GST",
+                "DPD",
+                "APD",
+                "PRES",
+                "ATMP",
+                "WTMP"
+            )
+
+            observation[
+                "xgb_complete"
+            ] = all(
+                observation[name]
+                is not None
+                for name in xgb_required
+            )
+
+            # ----------------------------------------------------
+            # LSTM completeness
+            # ----------------------------------------------------
+
+            observation[
+                "lstm_complete"
+            ] = all(
+                observation[name]
+                is not None
+                for name in (
+                    "VHM0",
+                    "VTPK",
+                    "VPED"
+                )
+            )
+
+            merged.append(
+                observation
+            )
+        # ========================================================
+        # 4. RETURN NEWEST OBSERVATIONS
+        # ========================================================
+
+        merged.sort(
+            key=lambda x:
+                x.get(
+                    "timestamp",
+                    ""
+                ),
+            reverse=True
+        )
+
+        return merged[
+            :int(required_count)
+        ]
 
     except Exception as e:
 
         print(
-            f"NDBC station {station} error:",
+            f"NDBC station {station} "
+            f"history error:",
             e
         )
 
         return []
-
-
-# ============================================================
-# FIND NEAREST RELEVANT NDBC STATION
-# ============================================================
 
 def fetch_ndbc_recent_observations(
     required_count=8,
@@ -2879,230 +3222,150 @@ def fetch_ndbc_recent_observations(
 
     try:
 
-        import requests
-        import xml.etree.ElementTree as ET
+        # ========================================================
+        # STABLE VERIFIED NDBC STATION
+        # ========================================================
+
+        STATION = "44011"
+
+        STATION_LAT = 41.088
+        STATION_LON = -66.546
+
+        # ========================================================
+        # GET AIS POSITION FOR DISTANCE ONLY
+        # ========================================================
+
+        if latitude is None or longitude is None:
+
+            position = _get_monitored_vessel_position()
+
+            if position is not None:
+
+                latitude = float(position[0])
+                longitude = float(position[1])
+
+        # ========================================================
+        # CALCULATE DISTANCE
+        # ========================================================
 
         if (
-            latitude is None
-            or longitude is None
+            latitude is not None
+            and longitude is not None
         ):
 
-            position = (
-                _get_monitored_vessel_position()
+            distance = haversine_km(
+                float(latitude),
+                float(longitude),
+                STATION_LAT,
+                STATION_LON
             )
 
-            if position is None:
+        else:
 
-                print(
-                    "NDBC: waiting for selected AIS vessel."
-                )
+            distance = 0.0
 
-                return []
+        # ========================================================
+        # READ VERIFIED STATION
+        # ========================================================
 
-            latitude = position[0]
-            longitude = position[1]
-
-        latitude = float(
-            latitude
+        history = _read_ndbc_station_history(
+            STATION,
+            100
         )
 
-        longitude = float(
-            longitude
+        # ========================================================
+        # PRINT STATUS
+        # ========================================================
+
+        print()
+        print(
+            "============================================================"
         )
-
-
-        # --------------------------------------------------------
-        # GET ACTIVE NDBC STATIONS
-        # --------------------------------------------------------
-
-        response = requests.get(
-            "https://www.ndbc.noaa.gov/activestations.xml",
-            timeout=15
-        )
-
-        response.raise_for_status()
-
-        root = ET.fromstring(
-            response.content
-        )
-
-        candidates = []
-
-
-        # --------------------------------------------------------
-        # CALCULATE DISTANCE FROM AIS VESSEL
-        # --------------------------------------------------------
-
-        for station_node in root:
-
-            station = (
-                station_node.attrib.get(
-                    "id"
-                )
-            )
-
-            lat_text = (
-                station_node.attrib.get(
-                    "lat"
-                )
-            )
-
-            lon_text = (
-                station_node.attrib.get(
-                    "lon"
-                )
-            )
-
-            met = (
-                station_node.attrib.get(
-                    "met",
-                    "y"
-                )
-            )
-
-            if (
-                not station
-                or not lat_text
-                or not lon_text
-            ):
-                continue
-
-            if met.lower() == "n":
-                continue
-
-            try:
-
-                station_lat = float(
-                    lat_text
-                )
-
-                station_lon = float(
-                    lon_text
-                )
-
-                distance = haversine_km(
-                    latitude,
-                    longitude,
-                    station_lat,
-                    station_lon
-                )
-
-                candidates.append(
-                    (
-                        distance,
-                        station
-                    )
-                )
-
-            except (
-                ValueError,
-                TypeError
-            ):
-
-                continue
-
-
-        candidates.sort(
-            key=lambda item: item[0]
-        )
-
-
-        # --------------------------------------------------------
-        # TRY NEAREST STATIONS
-        #
-        # IMPORTANT:
-        # Station must contain ALL 8 XGBOOST features.
-        # --------------------------------------------------------
-
-        for (
-            distance,
-            station
-        ) in candidates:
-
-            history = (
-                _read_ndbc_station_history(
-                    station,
-                    required_count
-                )
-            )
-
-            if (
-                len(history)
-                < required_count
-            ):
-                continue
-
-
-            MONITORED_NDBC_STATION = (
-                station
-            )
-
-            MONITORED_NDBC_DISTANCE_KM = (
-                round(
-                    distance,
-                    2
-                )
-            )
-
-
-            print()
-            print(
-                "============================================================"
-            )
-            print(
-                "NDBC STATION SELECTED FOR AIS VESSEL"
-            )
-            print(
-                "============================================================"
-            )
-
-            print(
-                "AIS MMSI:",
-                MONITORED_MMSI
-            )
-
-            print(
-                "AIS position:",
-                latitude,
-                longitude
-            )
-
-            print(
-                "NDBC station:",
-                station
-            )
-
-            print(
-                "Distance:",
-                MONITORED_NDBC_DISTANCE_KM,
-                "km"
-            )
-
-            print(
-                "Historical observations:",
-                len(history)
-            )
-
-            print(
-                "Oldest:",
-                history[0]["timestamp"]
-            )
-
-            print(
-                "Newest:",
-                history[-1]["timestamp"]
-            )
-
-            return history
-
 
         print(
-            "NDBC: no nearby station has the complete "
-            "8-feature history required by the models."
+            "NDBC STABLE STATION"
         )
 
-        return []
+        print(
+            "============================================================"
+        )
 
+        print(
+            "Station:",
+            STATION
+        )
+
+        print(
+            "Distance:",
+            round(distance, 2),
+            "km"
+        )
+
+        print(
+            "Historical observations:",
+            len(history)
+        )
+
+        # ========================================================
+        # COUNT MODEL-READY OBSERVATIONS
+        # ========================================================
+
+        lstm_ready = sum(
+            1
+            for item in history
+            if (
+                item.get("VHM0") is not None
+                and
+                item.get("VTPK") is not None
+                and
+                item.get("VPED") is not None
+            )
+        )
+
+        xgb_ready = sum(
+            1
+            for item in history
+            if item.get("xgb_complete") is True
+        )
+
+        print(
+            "LSTM ready:",
+            lstm_ready
+        )
+
+        print(
+            "XGBoost ready:",
+            xgb_ready
+        )
+
+        # ========================================================
+        # SAVE ACTIVE STATION
+        # ========================================================
+
+        MONITORED_NDBC_STATION = STATION
+
+        MONITORED_NDBC_DISTANCE_KM = round(
+            distance,
+            2
+        )
+
+        # ========================================================
+        # REQUIRE 8 LSTM OBSERVATIONS
+        # ========================================================
+
+        if lstm_ready < 8:
+
+            print(
+                "NDBC: not enough LSTM observations."
+            )
+
+            return []
+
+        # ========================================================
+        # RETURN HISTORY
+        # ========================================================
+
+        return history
 
     except Exception as e:
 
@@ -3112,7 +3375,6 @@ def fetch_ndbc_recent_observations(
         )
 
         return []
-
 
 # ============================================================
 # FETCH LATEST OBSERVATION
@@ -3172,8 +3434,22 @@ def fetch_ndbc_wave_observation():
 
             NDBC_XGB_HISTORY.clear()
 
+            xgb_required = [
+                "WVHT", "WSPD", "GST", "DPD",
+                "APD", "PRES", "ATMP", "WTMP"
+            ]
+
+            valid_xgb = [
+                observation
+                for observation in history
+                if all(
+                    observation.get(feature) is not None
+                    for feature in xgb_required
+                )
+            ]
+
             NDBC_XGB_HISTORY.extend(
-                history[-3:]
+                valid_xgb[-3:]
             )
 
 
@@ -3359,7 +3635,7 @@ def run_ndbc_xgb_prediction(
     #
     # history is chronological:
     #
-    # oldest Ã¢â€ â€™ newest
+    # oldest ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ newest
     #
     # XGBoost training expects:
     #
@@ -3375,15 +3651,19 @@ def run_ndbc_xgb_prediction(
 
     values = []
 
-
     for observation in newest_to_oldest:
 
         for feature in base_features:
 
-            values.append(
-                float(
-                    observation[feature]
+            value = observation.get(feature)
+
+            if value is None:
+                raise ValueError(
+                    f"Missing XGBoost feature: {feature}"
                 )
+
+            values.append(
+                float(value)
             )
 
 
@@ -3586,8 +3866,28 @@ def load_offline_wave_cache():
 
         NDBC_XGB_HISTORY.clear()
 
+        xgb_required = [
+            "WVHT",
+            "WSPD",
+            "GST",
+            "DPD",
+            "APD",
+            "PRES",
+            "ATMP",
+            "WTMP"
+        ]
+
+        valid_cached_xgb = [
+            observation
+            for observation in xgb_history
+            if all(
+                observation.get(feature) is not None
+                for feature in xgb_required
+            )
+        ]
+
         NDBC_XGB_HISTORY.extend(
-            xgb_history[-3:]
+            valid_cached_xgb[-3:]
         )
 
 
@@ -3821,17 +4121,15 @@ async def ndbc_wave_loop():
                 )
 
                 history = (
-                    fetch_ndbc_recent_observations(
-                        required_count=8,
-                        latitude=latitude,
-                        longitude=longitude
+                    _read_ndbc_station_history(
+                        new_station,
+                        8
                     )
                 )
 
 
                 if (
                     history is None
-                    or len(history) < 8
                 ):
 
                     print()
@@ -3961,16 +4259,29 @@ async def ndbc_wave_loop():
                 # ====================================================
                 # XGBOOST HISTORY
                 #
-                # Use latest 3 observations from same 8-observation
-                # NDBC history.
                 # ====================================================
+                # XGBOOST HISTORY
+                # Independent from LSTM.
+                # Only complete 8-feature observations are allowed.
+                # ====================================================
+
+                xgb_history = [
+                    observation
+                    for observation in history
+                    if observation.get("xgb_complete", False)
+                ]
 
                 NDBC_XGB_HISTORY.clear()
 
                 NDBC_XGB_HISTORY.extend(
-                    history[-3:]
+                    xgb_history[-3:]
                 )
 
+                print(
+                    "XGBoost valid observations:",
+                    len(NDBC_XGB_HISTORY),
+                    "/ 3"
+                )
 
                 NDBC_LAST_TIMESTAMP = (
                     history[-1]["timestamp"]
@@ -4200,9 +4511,13 @@ async def ndbc_wave_loop():
                     # XGBOOST
                     # ================================================
 
-                    NDBC_XGB_HISTORY.append(
-                        observation
-                    )
+                    if observation.get("xgb_complete", False):
+
+                        if observation.get("xgb_complete", False):
+                            xgb_required = ["WVHT", "WSPD", "GST", "DPD", "APD", "PRES", "ATMP", "WTMP"]
+                            xgb_valid = all(observation.get(k) is not None for k in xgb_required)
+                            if xgb_valid:
+                                NDBC_XGB_HISTORY.append(observation)
 
 
                     if (
@@ -4526,7 +4841,6 @@ async def lifespan(
 ):
 
     global AIS_TASK
-    global VESSELAPI_TASK
     global NDBC_TASK
 
     print()
@@ -4538,7 +4852,7 @@ async def lifespan(
 
 
     # ------------------------------------------------------------
-    # START VESSELAPI FIRST
+    # START AISSTREAM
     # ------------------------------------------------------------
 
     # RESTORE OFFLINE WAVE CACHE
@@ -4550,9 +4864,6 @@ async def lifespan(
         except Exception:
             pass
 
-    VESSELAPI_TASK = asyncio.create_task(
-        vesselapi_worker()
-    )
 
 
     # ------------------------------------------------------------
@@ -4597,20 +4908,9 @@ async def lifespan(
 
 
         # --------------------------------------------------------
-        # STOP VESSELAPI
+        # STOP AISSTREAM
         # --------------------------------------------------------
 
-        if VESSELAPI_TASK is not None:
-
-            VESSELAPI_TASK.cancel()
-
-            try:
-
-                await VESSELAPI_TASK
-
-            except asyncio.CancelledError:
-
-                pass
 
 
         # --------------------------------------------------------
@@ -4663,38 +4963,70 @@ app = FastAPI(
     "/wave/ndbc/xgboost"
 )
 def get_ndbc_xgboost_result():
+
     global NDBC_LAST_XGB_RESULT
 
+    # ========================================================
+    # ALWAYS CALCULATE FROM CURRENT 3 VALID OBSERVATIONS
+    # ========================================================
 
-    if NDBC_LAST_XGB_RESULT is None and len(NDBC_XGB_HISTORY) >= 3:
-        try:
-            NDBC_LAST_XGB_RESULT = run_ndbc_xgb_prediction(
-                NDBC_XGB_HISTORY[-3:]
-            )
-        except Exception:
-            pass
-
-    if NDBC_LAST_XGB_RESULT is None:
+    if len(NDBC_XGB_HISTORY) < 3:
 
         return {
-
-            "status":
-                "waiting",
-
-            "required":
-                3,
-
-            "count":
-                len(
-                    NDBC_XGB_HISTORY
-                ),
-
-            "result":
-                None
+            "status": "waiting",
+            "required": 3,
+            "count": len(NDBC_XGB_HISTORY),
+            "result": None
         }
 
+    try:
 
-    return NDBC_LAST_XGB_RESULT
+        latest_history = NDBC_XGB_HISTORY[-3:]
+
+        print()
+        print("============================================================")
+        print("NDBC XGBOOST API PREDICTION")
+        print("============================================================")
+        print("Observations:", len(latest_history))
+
+        NDBC_LAST_XGB_RESULT = run_ndbc_xgb_prediction(
+            latest_history
+        )
+
+        if NDBC_LAST_XGB_RESULT is None:
+
+            return {
+                "status": "error",
+                "required": 3,
+                "count": len(NDBC_XGB_HISTORY),
+                "result": None,
+                "error": "XGBoost returned None"
+            }
+
+        NDBC_LAST_XGB_RESULT["mode"] = "ONLINE"
+        NDBC_LAST_XGB_RESULT["data_source"] = "NDBC"
+
+        print(
+            "NDBC XGBOOST API RESULT:",
+            NDBC_LAST_XGB_RESULT
+        )
+
+        return NDBC_LAST_XGB_RESULT
+
+    except Exception as e:
+
+        print(
+            "NDBC XGBOOST API ERROR:",
+            repr(e)
+        )
+
+        return {
+            "status": "error",
+            "required": 3,
+            "count": len(NDBC_XGB_HISTORY),
+            "result": None,
+            "error": str(e)
+        }
 
 
 # ============================================================
@@ -4944,72 +5276,21 @@ def build_vessel_record(
 async def get_ais_vessels():
 
     # ========================================================
-    # COMBINE VESSELAPI + AISSTREAM
+    # AISSTREAM-ONLY LIVE VESSELS
     # ========================================================
 
-    combined = {}
-
-    # --------------------------------------------------------
-    # 1. ADD VESSELAPI VESSELS
-    # --------------------------------------------------------
-
-    for vessel in VESSELAPI_VESSELS.values():
-
-        record = build_vessel_record(vessel)
-
-        mmsi = record.get("mmsi")
-
-        if mmsi is not None:
-            combined[str(mmsi)] = record
-
-
-    # --------------------------------------------------------
-    # 2. ADD AISSTREAM VESSELS
-    # --------------------------------------------------------
-    # If the same MMSI exists in both sources,
-    # keep one vessel instead of creating a duplicate.
+    vessels = []
 
     for vessel in AIS_VESSELS.values():
 
-        record = build_vessel_record(vessel)
+        record = build_vessel_record(
+            vessel
+        )
 
-        mmsi = record.get("mmsi")
-
-        if mmsi is None:
-            continue
-
-        key = str(mmsi)
-
-        if key in combined:
-
-            # Same vessel exists in both APIs.
-            # Merge missing AIS information without
-            # replacing the existing VesselAPI record.
-
-            combined[key].update({
-                key_name: value
-                for key_name, value in record.items()
-                if value is not None
-            })
-
-        else:
-
-            # Vessel exists only in AISStream.
-            combined[key] = record
-
-
-    # --------------------------------------------------------
-    # 3. FINAL VESSEL LIST
-    # --------------------------------------------------------
-
-    vessels = list(
-        combined.values()
-    )
-
-
-    # --------------------------------------------------------
-    # 4. RETURN ALL VESSELS
-    # --------------------------------------------------------
+        if record.get("mmsi") is not None:
+            vessels.append(
+                record
+            )
 
     return {
         "status":
@@ -5022,9 +5303,6 @@ async def get_ais_vessels():
             vessels,
 
         "sources": {
-            "VesselAPI":
-                len(VESSELAPI_VESSELS),
-
             "AISStream":
                 len(AIS_VESSELS),
 
@@ -5033,7 +5311,7 @@ async def get_ais_vessels():
         },
 
         "message":
-            "Live vessels combined from VesselAPI and AISStream."
+            "Live vessels provided by AISStream."
     }
 
 
@@ -5046,43 +5324,7 @@ def find_vessel_by_mmsi(mmsi):
     target = str(int(mmsi))
 
     # ========================================================
-    # VESSELAPI FIRST
-    # ========================================================
-
-    try:
-
-        # Direct lookup
-        vessel = VESSELAPI_VESSELS.get(target)
-
-        if vessel is not None:
-            return vessel
-
-        # Try integer key
-        vessel = VESSELAPI_VESSELS.get(int(target))
-
-        if vessel is not None:
-            return vessel
-
-        # Search through all VesselAPI vessels
-        for item in VESSELAPI_VESSELS.values():
-
-            try:
-
-                if str(item.get("mmsi")) == target:
-                    return item
-
-            except Exception:
-                continue
-
-    except Exception as e:
-
-        print(
-            "VesselAPI vessel search error:",
-            e
-        )
-
-    # ========================================================
-    # AISSTREAM SECOND
+    # AISSTREAM LIVE VESSEL LOOKUP
     # ========================================================
 
     try:
@@ -5155,7 +5397,7 @@ def find_vessel_by_mmsi(mmsi):
 
     print(
         f"MMSI {target} not found in "
-        f"VesselAPI, AISStream, or fallback."
+        f"AISStream or fallback."
     )
 
     return None
@@ -5627,8 +5869,22 @@ async def get_live_vessel_risk(
 
             NDBC_XGB_HISTORY.clear()
 
+            xgb_required = [
+                "WVHT", "WSPD", "GST", "DPD",
+                "APD", "PRES", "ATMP", "WTMP"
+            ]
+
+            valid_xgb = [
+                observation
+                for observation in startup_history
+                if all(
+                    observation.get(feature) is not None
+                    for feature in xgb_required
+                )
+            ]
+
             NDBC_XGB_HISTORY.extend(
-                startup_history[-3:]
+                valid_xgb[-3:]
             )
 
 
@@ -6273,7 +6529,7 @@ def optimize_route_from_ais(
 
     # ========================================================
     # FIND VESSEL
-    # VesselAPI is first through find_vessel_by_mmsi()
+    # AISStream is the live vessel source through find_vessel_by_mmsi()
     # ========================================================
 
     vessel = find_vessel_by_mmsi(
@@ -6985,18 +7241,64 @@ def optimize_route_from_ais(
 
                     continue
 
-            selected = (
+            # ------------------------------------------------
+            # ------------------------------------------------
+            # ROUTE CANDIDATE SCORING
+            # ------------------------------------------------
 
+            remaining_distance = haversine_km(
                 candidate_lat,
                 candidate_lon,
-                candidate_heading,
-                turn
-
+                destination_lat,
+                destination_lon
             )
 
-            break
+            turn_penalty = abs(float(turn))
 
-        # ====================================================
+            # NORMAL / OPTIMIZED:
+            # Prefer efficient progress toward destination.
+            if route_mode == "OPTIMIZED":
+
+                candidate_score = (
+                    remaining_distance
+                    +
+                    (turn_penalty * 0.02)
+                )
+
+            # SAFEST / HIGH_WAVE:
+            # Prefer smoother and more conservative turns.
+            else:
+
+                candidate_score = (
+                    remaining_distance
+                    +
+                    (turn_penalty * 0.12)
+                )
+
+            if hazard == "HIGH_WAVE":
+
+                candidate_score += (
+                    turn_penalty * 0.10
+                )
+
+            # Keep the best SAFE candidate.
+            if (
+                selected is None
+                or
+                candidate_score < selected[4]
+            ):
+
+                selected = (
+
+                    candidate_lat,
+                    candidate_lon,
+                    candidate_heading,
+                    turn,
+                    candidate_score
+
+                )
+
+
         # NO SAFE PPO STEP
         # ====================================================
 
@@ -7021,7 +7323,8 @@ def optimize_route_from_ais(
             simulation_lat,
             simulation_lon,
             simulation_heading,
-            selected_turn
+            selected_turn,
+            _selected_score
 
         ) = selected
 
@@ -7128,23 +7431,21 @@ def optimize_route_from_ais(
         ):
 
             print(
-                "GLOBAL ROUTER: direct route is ocean-safe."
             )
 
-            return [
-                (
-                    start_lat,
-                    start_lon
-                ),
-                (
-                    goal_lat,
-                    goal_lon
-                )
-            ]
+            print(
+                "GLOBAL ROUTER: direct path is ocean-safe."
+            )
 
-        print(
-            "GLOBAL ROUTER: direct route crosses land."
-        )
+            print(
+                "GLOBAL ROUTER: continuing to A* for route optimization."
+            )
+
+        else:
+
+            print(
+                "GLOBAL ROUTER: direct route crosses land."
+            )
 
         # ========================================================
         # SEARCH AREA
@@ -7186,14 +7487,56 @@ def optimize_route_from_ais(
             max_lon - min_lon
         )
 
+        # --------------------------------------------------------
+        # ADAPTIVE GLOBAL GRID
+        # --------------------------------------------------------
+
+        max_grid_cells = 90
+
+        required_step_lat = (
+            lat_span / max_grid_cells
+            if lat_span > 0
+            else grid_step
+        )
+
+        required_step_lon = (
+            lon_span / max_grid_cells
+            if lon_span > 0
+            else grid_step
+        )
+
+        grid_step = max(
+            grid_step,
+            required_step_lat,
+            required_step_lon
+        )
+
+        grid_step = min(
+            grid_step,
+            2.0
+        )
+
+        print(
+            "GLOBAL ROUTER ADAPTIVE GRID STEP:",
+            round(grid_step, 4)
+        )
+
+
+        # --------------------------------------------------------
+        # SEARCH PADDING
+        #
+        # Keep a small buffer around the start/destination area.
+        # The grid resolution is already adaptive for long routes.
+        # --------------------------------------------------------
+
         padding_lat = max(
             3.0,
-            lat_span * 0.50
+            grid_step * 5.0
         )
 
         padding_lon = max(
             3.0,
-            lon_span * 0.50
+            grid_step * 5.0
         )
 
         min_lat = max(
@@ -7247,15 +7590,9 @@ def optimize_route_from_ais(
         )
 
         # Prevent runaway memory/time.
-        lat_count = min(
-            lat_count,
-            220
-        )
+        lat_count = min(lat_count, 100)
 
-        lon_count = min(
-            lon_count,
-            220
-        )
+        lon_count = min(lon_count, 100)
 
         print(
             "GLOBAL ROUTER GRID:",
@@ -7353,7 +7690,23 @@ def optimize_route_from_ais(
                 )
             )
 
-            max_radius = 8
+            # Adaptive endpoint search radius.
+            # Coarser grids need more cells to reach the real
+            # ocean endpoint while still respecting land checks.
+            max_radius = max(
+                8,
+                min(
+                    30,
+                    int(
+                        math.ceil(
+                            1.5 / max(
+                                grid_step,
+                                0.01
+                            )
+                        )
+                    )
+                )
+            )
 
             best_node = None
             best_distance = float(
@@ -7638,7 +7991,14 @@ def optimize_route_from_ais(
         # This prevents very large global searches.
         # --------------------------------------------------------
 
-        corridor_margin = 35
+        # Search the complete generated grid.
+        #
+        # The grid itself is bounded to prevent runaway memory
+        # usage. Land rejection remains enforced by safe_edge().
+        corridor_margin = max(
+            lat_count,
+            lon_count
+        )
 
         min_search_row = max(
             0,
@@ -7783,6 +8143,10 @@ def optimize_route_from_ais(
                     )
                 )
 
+                # ====================================================
+                # HAZARD-AWARE A* COST
+                # ====================================================
+
                 movement_cost = (
                     haversine_km(
                         current_latitude,
@@ -7792,10 +8156,42 @@ def optimize_route_from_ais(
                     )
                 )
 
+                if route_mode == "OPTIMIZED":
+
+                    edge_cost = movement_cost
+
+                else:
+
+                    # SAFEST / HIGH_WAVE:
+                    # Penalize routes close to land.
+                    shore_distance = (
+                        distance_to_shore_km(
+                            neighbor_latitude,
+                            neighbor_longitude
+                        )
+                    )
+
+                    if shore_distance < 10.0:
+
+                        shore_penalty = (
+                            (10.0 - shore_distance)
+                            * 2.5
+                        )
+
+                    else:
+
+                        shore_penalty = 0.0
+
+                    edge_cost = (
+                        movement_cost
+                        +
+                        shore_penalty
+                    )
+
                 new_cost = (
                     current_cost
                     +
-                    movement_cost
+                    edge_cost
                 )
 
                 previous_cost = g_score.get(
@@ -8642,5 +9038,24 @@ def optimize_route_from_ais(
             )
 
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

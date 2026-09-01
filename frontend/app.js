@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // SHIP DETAILS â†’ MONITORING
 // ============================================================
 
@@ -208,109 +208,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
             }
 
-
-            // ------------------------------------------------
-            // START BACKEND AIS -> NDBC PIPELINE
-            // ------------------------------------------------
-
-            try {
-
-                console.log(
-                    "SELECTING LOGIN VESSEL:",
-                    shipProfile
-                );
-
-                const response =
-                    await fetch(
-                        `${API_BASE}/select-vessel`,
-                        {
-                            method: "POST",
-
-                            headers: {
-                                "Content-Type":
-                                    "application/json"
-                            },
-
-                            body:
-                                JSON.stringify({
-                                    mmsi:
-                                        shipProfile.mmsi,
-
-                                    ship_name:
-                                        shipProfile.shipName,
-
-                                    ship_type:
-                                        shipProfile.shipType
-                                })
-                        }
-                    );
-
-
-                const data =
-                    await response.json();
-
-
-                if (!response.ok) {
-
-                    throw new Error(
-                        data.detail ||
-                        "Backend could not find this vessel."
-                    );
-                }
-
-
-                console.log(
-                    "AIS -> NDBC RESULT:",
-                    data
-                );
-
-
-                // Save backend-selected AIS vessel
-                if (
-                    data.vessel
-                ) {
-
-                    sessionStorage.setItem(
-                        "marineCurrentVessel",
-                        JSON.stringify(
-                            data.vessel
-                        )
-                    );
-                }
-
-
-                // Save NDBC result
-                sessionStorage.setItem(
-                    "marineNDBCResult",
-                    JSON.stringify(
-                        data.ndbc ||
-                        {}
-                    )
-                );
-
-
-                console.log(
-                    "AIS -> NDBC PIPELINE COMPLETE"
-                );
-
-
-            } catch (error) {
-
-                console.error(
-                    "AIS -> NDBC SELECTION FAILED:",
-                    error
-                );
-
-                shipDetailsError.textContent =
-                    error.message ||
-                    "Unable to find this vessel.";
-
-                shipDetailsError.classList.remove(
-                    "hidden"
-                );
-
-                return;
-            }
 
             // ------------------------------------------------
             // HIDE ERROR
@@ -2444,3 +2341,5 @@ async function start() {
 // ============================================================
 
 start();
+
+

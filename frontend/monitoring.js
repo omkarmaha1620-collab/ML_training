@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // AI MARINE MONITORING SYSTEM
 // FRESH COMPLETE MONITORING.JS
 // ============================================================
@@ -328,7 +328,7 @@ function updateConnectionStatus(
     if (connected) {
 
         status.textContent =
-            `AIS LIVE â€¢ ${vesselCount} VESSELS`;
+            `AIS LIVE Ã¢â‚¬Â¢ ${vesselCount} VESSELS`;
 
 
         status.classList.remove(
@@ -615,13 +615,13 @@ function setMonitoringWaiting() {
 
     setText(
         "liveCourse",
-        "--Â°"
+        "--Ã‚Â°"
     );
 
 
     setText(
         "liveHeading",
-        "--Â°"
+        "--Ã‚Â°"
     );
 
 
@@ -668,13 +668,13 @@ function setMonitoringWaiting() {
 
 
     setText(
-        "waveRisk",
+        "stormLevel",
         "WAITING"
     );
 
 
     setText(
-        "waveProbability",
+        "stormProbability",
         "--"
     );
 
@@ -720,13 +720,13 @@ function setMonitoringUnavailable() {
 
     setText(
         "liveCourse",
-        "--Â°"
+        "--Ã‚Â°"
     );
 
 
     setText(
         "liveHeading",
-        "--Â°"
+        "--Ã‚Â°"
     );
 
 
@@ -773,13 +773,13 @@ function setMonitoringUnavailable() {
 
 
     setText(
-        "waveRisk",
+        "stormLevel",
         "OFFLINE"
     );
 
 
     setText(
-        "waveProbability",
+        "stormProbability",
         "--"
     );
 
@@ -809,7 +809,7 @@ function setMonitoringUnavailable() {
 
 
     updateProgress(
-        "waveProgress",
+        "stormBar",
         0
     );
 
@@ -970,8 +970,8 @@ function updateVesselDisplay(
         Number.isFinite(
             course
         )
-            ? `${course.toFixed(1)}Â°`
-            : "--Â°"
+            ? `${course.toFixed(1)}Ã‚Â°`
+            : "--Ã‚Â°"
     );
 
 
@@ -980,8 +980,8 @@ function updateVesselDisplay(
         Number.isFinite(
             heading
         )
-            ? `${heading.toFixed(1)}Â°`
-            : "--Â°"
+            ? `${heading.toFixed(1)}Ã‚Â°`
+            : "--Ã‚Â°"
     );
 
 
@@ -1312,13 +1312,13 @@ function updateStormDisplay(
     if (!storm) {
 
         setText(
-            "waveRisk",
+            "stormLevel",
             "WAITING"
         );
 
 
         setText(
-            "waveProbability",
+            "stormProbability",
             "--"
         );
 
@@ -1330,7 +1330,7 @@ function updateStormDisplay(
 
 
         updateProgress(
-            "waveProgress",
+            "stormBar",
             0
         );
 
@@ -1421,25 +1421,25 @@ function updateStormDisplay(
 
 
     setText(
-        "waveRisk",
+        "stormLevel",
         displayLevel
     );
 
 
     // --------------------------------------------------------
-    // DISPLAY XGBOOST PROBABILITY USING 50% DECISION THRESHOLD
+    // DISPLAY ACTUAL XGBOOST PROBABILITY
     // --------------------------------------------------------
 
     let probabilityDisplay;
 
     if (probability < 50) {
-        probabilityDisplay = "<50%";
+        probabilityDisplay = `${probability.toFixed(1)}%`;
     } else {
         probabilityDisplay = `${probability.toFixed(1)}%`;
     }
 
     setText(
-        "waveProbability",
+        "stormProbability",
         probabilityDisplay
     );
 
@@ -1451,13 +1451,13 @@ function updateStormDisplay(
 
 
     setRiskClass(
-        "waveRisk",
+        "stormLevel",
         level
     );
 
 
     updateProgress(
-        "waveProgress",
+        "stormBar",
         probability
     );
 
@@ -1583,12 +1583,12 @@ async function getNDBCStormPrediction() {
         ) {
 
             setText(
-                "waveRisk",
+                "stormLevel",
                 "WAITING"
             );
 
             setText(
-                "waveProbability",
+                "stormProbability",
                 "--"
             );
 
@@ -1598,7 +1598,7 @@ async function getNDBCStormPrediction() {
             );
 
             updateProgress(
-                "waveProgress",
+                "stormBar",
                 0
             );
 
@@ -1635,7 +1635,7 @@ async function getNDBCStormPrediction() {
             // Update the wave-risk UI directly.
 
             setText(
-                "waveRisk",
+                "stormLevel",
                 String(
                     storm.hazard ||
                     "NORMAL"
@@ -1644,7 +1644,7 @@ async function getNDBCStormPrediction() {
 
 
             setText(
-                "waveProbability",
+                "stormProbability",
                 `${Number(
                     storm.probability_percent ||
                     0
@@ -1659,7 +1659,7 @@ async function getNDBCStormPrediction() {
 
 
             updateProgress(
-                "waveProgress",
+                "stormBar",
                 Number(
                     storm.probability_percent ||
                     0
@@ -1681,13 +1681,13 @@ async function getNDBCStormPrediction() {
 
 
         setText(
-            "waveRisk",
+            "stormLevel",
             "NDBC ERROR"
         );
 
 
         setText(
-            "waveProbability",
+            "stormProbability",
             "--"
         );
 
@@ -1699,7 +1699,7 @@ async function getNDBCStormPrediction() {
 
 
         updateProgress(
-            "waveProgress",
+            "stormBar",
             0
         );
 
@@ -2807,7 +2807,7 @@ async function loadMonitoringData() {
         ) {
 
             safetyMessage.textContent =
-                `LIVE AIS TRACKING ACTIVE â€” ${vessel.ship_name}`;
+                `LIVE AIS TRACKING ACTIVE Ã¢â‚¬â€ ${vessel.ship_name}`;
         }
 
 
@@ -3049,7 +3049,7 @@ if (riskLevel) {
 
             backendStatus.textContent =
                 isOffline
-                    ? "BACKEND ONLINE â€¢ OFFLINE ML"
+                    ? "BACKEND ONLINE Ã¢â‚¬Â¢ OFFLINE ML"
                     : "BACKEND ONLINE";
 
 
@@ -3684,3 +3684,5 @@ if (
 
     startMonitoringPage();
 }
+
+
