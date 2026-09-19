@@ -1203,7 +1203,9 @@ def point_is_land(
         LAND_GDF is None
         or LAND_GDF.empty
     ):
-        return False
+        raise RuntimeError(
+            "Land data is unavailable; route cannot be considered ocean-safe."
+        )
 
     try:
 
@@ -1215,8 +1217,6 @@ def point_is_land(
         #
         # Natural Earth 10m land polygons are generalized and can
         # incorrectly cover narrow Norwegian fjord water.
-        # This small demo-area exception prevents a false
-        # "vessel is on land" result.
         # --------------------------------------------------------
 
         if (
@@ -1236,9 +1236,15 @@ def point_is_land(
             .any()
         )
 
-    except Exception:
+    except Exception as exc:
 
-        return False
+        print(
+            f"LAND POINT CHECK ERROR: {exc}"
+        )
+
+        raise RuntimeError(
+            "Land point detection failed; route cannot be considered ocean-safe."
+        )
 
 
 def segment_crosses_land(
@@ -1252,8 +1258,9 @@ def segment_crosses_land(
         LAND_GDF is None
         or LAND_GDF.empty
     ):
-
-        return False
+        raise RuntimeError(
+            "Land data is unavailable; route cannot be considered ocean-safe."
+        )
 
     try:
 
@@ -1274,9 +1281,15 @@ def segment_crosses_land(
             .any()
         )
 
-    except Exception:
+    except Exception as exc:
 
-        return False
+        print(
+            f"LAND SEGMENT CHECK ERROR: {exc}"
+        )
+
+        raise RuntimeError(
+            "Land segment detection failed; route cannot be considered ocean-safe."
+        )
 
 
 def route_crosses_land(
@@ -1302,6 +1315,67 @@ def route_crosses_land(
 
     return False
 
+def validate_ocean_route(
+    points,
+    start_lat,
+    start_lon,
+    destination_lat,
+    destination_lon
+):
+
+    if LAND_GDF is None or LAND_GDF.empty:
+        raise RuntimeError(
+            "Land data is unavailable; route cannot be considered ocean-safe."
+        )
+
+    if not points:
+        return False
+
+    if point_is_land(
+        start_lat,
+        start_lon
+    ):
+        return False
+
+    if point_is_land(
+        destination_lat,
+        destination_lon
+    ):
+        return False
+
+    for point in points:
+
+        if point_is_land(
+            point["latitude"],
+            point["longitude"]
+        ):
+            return False
+
+    for i in range(
+        len(points) - 1
+    ):
+
+        if segment_crosses_land(
+            points[i]["latitude"],
+            points[i]["longitude"],
+            points[i + 1]["latitude"],
+            points[i + 1]["longitude"]
+        ):
+            return False
+
+    final_point = points[-1]
+
+    final_distance = haversine_km(
+        final_point["latitude"],
+        final_point["longitude"],
+        destination_lat,
+        destination_lon
+    )
+
+    if final_distance > 1.0:
+        return False
+
+    return True
 
 # ============================================================
 # DISTANCE TO SHORE
@@ -7081,11 +7155,11 @@ def optimize_route_from_ais(
 
         step_distance = min(
 
-            5.0,
+            1.5,
 
             max(
-                0.5,
-                distance / 20.0
+                0.6,
+                distance / 45.0
             )
 
         )
@@ -7255,24 +7329,37 @@ def optimize_route_from_ais(
 
             turn_penalty = abs(float(turn))
 
-            # NORMAL / OPTIMIZED:
-            # Prefer efficient progress toward destination.
+            # Keep PPO steering as the primary navigation decision.
+            # Small deviations are allowed when they improve progress
+            # or help the route remain clear of land.
+            ppo_deviation = abs(
+                float(turn) - float(ppo_turn)
+            )
+
+            # Penalize abrupt steering changes.
+            smoothness_penalty = (
+                abs(float(turn)) * 0.08
+            )
+
+            # Prefer progress while keeping PPO influential.
             if route_mode == "OPTIMIZED":
 
                 candidate_score = (
                     remaining_distance
                     +
-                    (turn_penalty * 0.02)
+                    (ppo_deviation * 0.18)
+                    +
+                    (smoothness_penalty * 0.35)
                 )
 
-            # SAFEST / HIGH_WAVE:
-            # Prefer smoother and more conservative turns.
             else:
 
                 candidate_score = (
                     remaining_distance
                     +
-                    (turn_penalty * 0.12)
+                    (ppo_deviation * 0.25)
+                    +
+                    (smoothness_penalty * 0.60)
                 )
 
             if hazard == "HIGH_WAVE":
@@ -7431,15 +7518,23 @@ def optimize_route_from_ais(
         ):
 
             print(
-            )
-
-            print(
                 "GLOBAL ROUTER: direct path is ocean-safe."
             )
 
             print(
-                "GLOBAL ROUTER: continuing to A* for route optimization."
+                "GLOBAL ROUTER: using direct route."
             )
+
+            return [
+                (
+                    start_lat,
+                    start_lon
+                ),
+                (
+                    goal_lat,
+                    goal_lon
+                )
+            ]
 
         else:
 
@@ -8885,6 +8980,29 @@ def optimize_route_from_ais(
         )
 
     # ========================================================
+    # ========================================================
+    # CENTRAL FINAL OCEAN-SAFETY VALIDATION
+    # ========================================================
+
+    if not validate_ocean_route(
+        route_points,
+        current_lat,
+        current_lon,
+        destination_lat,
+        destination_lon
+    ):
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail=(
+                "Final route failed ocean-safety validation. "
+                "The vessel, destination, route points, and "
+                "route segments must all be on water."
+            )
+
+        )
     # ROUTE DISTANCE
     # ========================================================
 
@@ -9038,6 +9156,10 @@ def optimize_route_from_ais(
             )
 
     }
+
+
+
+
 
 
 
